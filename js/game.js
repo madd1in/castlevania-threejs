@@ -39,8 +39,8 @@ var ZONES = [
 var G = {
   state: 'boot', t: 0, score: 0, kills: 0, shake: 0, freeze: 0,
   camX: 6, camY: 4, bossStarted: false, midbossStarted: false, midbossDone: false,
-  elapsed: 0, toastT: 0, cardT: 0, stopwatch: 0,
-  combo: 0, comboT: 0, zone: -1, best: 0,
+  elapsed: 0, toastT: 0, cardT: 0, stopwatch: 0, cine: 0,
+  combo: 0, comboT: 0, zone: -1, best: 0, hurtFx: 0, beatT: 0, candleT: 0,
 
   addScore: function (n) { this.score += n; },
   registerKill: function (base) {
@@ -56,7 +56,8 @@ var G = {
   },
   card: function (num, name) {
     var el = $('card');
-    el.innerHTML = '<span class="cnum">STAGE ' + num + '</span><span class="cname">' + name + '</span>';
+    var top = num ? ('STAGE ' + num) : 'THE MASTER OF THE CASTLE';
+    el.innerHTML = '<span class="cnum">' + top + '</span><span class="cname">' + name + '</span>';
     el.style.opacity = '1'; this.cardT = 2.4;
   },
   flash: function () {
@@ -110,8 +111,14 @@ function clearActors() {
 /* ------------------------- screens ------------------------- */
 var FRAMES = {
   title: function () {
+    var d = D();
     return '<h1>CASTLEVANIA</h1>' +
       '<h2>Shadow of the Crimson Moon</h2>' +
+      '<div class="rule"></div>' +
+      '<div class="diffpick">&larr;&nbsp; <span style="color:' + d.tint + '">' + d.name + '</span> &nbsp;&rarr;' +
+      '<div class="diffsub">' + d.hp + ' HP &middot; ' + d.lives + ' Leben &middot; ' +
+      (d.dmg < 1 ? 'halber' : (d.dmg > 1 ? 'erhöhter' : 'normaler')) + ' Schaden' +
+      '<br><span style="color:#6d6553">Pfeiltasten links/rechts zum Wechseln</span></div></div>' +
       '<div class="rule"></div>' +
       '<div class="keys">' +
       '<div><b>A / D</b> oder <b>&larr; &rarr;</b> — Laufen</div>' +
@@ -162,16 +169,20 @@ function setState(s) {
     screen.className = 'screen';
     hud.className = (s === 'pause') ? 'show' : '';
   }
-  if (s === 'title') A.setTheme('title', true);
-  if (s === 'gameover' || s === 'win') A.stop();
+  if (s === 'title') { A.danger = false; A.setTheme('title', true); }
+  if (s === 'gameover') { A.danger = false; A.setTheme('gameover', true); A.resume(); if (A.on) A.start(); }
+  if (s === 'win') { A.danger = false; A.setTheme('victory', true); A.resume(); if (A.on) A.start(); }
 }
 
 function startRun() {
   G.score = 0; G.kills = 0; G.elapsed = 0;
   G.bossStarted = false; G.midbossStarted = false; G.midbossDone = false;
   G.stopwatch = 0; G.combo = 0; G.comboT = 0; G.zone = -1; G.freeze = 0;
+  G.cine = 0; G.hurtFx = 0; G.candleT = 0;
   clearActors();
-  P.hp = P.maxHp; P.hearts = 8; P.lives = 4; P.whipLvl = 0; P.sub = null;
+  P.maxHp = D().hp;
+  P.hp = P.maxHp; P.hearts = D().hearts; P.lives = D().lives;
+  P.whipLvl = 0; P.sub = null; P.subMul = 1;
   P.dead = false; P.deadT = 0; P.inv = 0; P.atk = 0; P.atkCool = 0;
   P.x = 3; P.y = 2; P.vx = 0; P.vy = 0; P.face = 1; P.jumps = 0; P.spin = 0;
   setCrouch(false);
@@ -182,15 +193,22 @@ function startRun() {
     if (!candles[c].alive) { candles[c].alive = true; scene.add(candles[c].g); }
   }
   G.camX = clamp(P.x, HALF_W, LEVEL_MAX - HALF_W); G.camY = 4;
-  A.resume(); A.setTheme('courtyard', true); A.start();
+  buildBars();
+  lastHud = {};
+  $('diffname').textContent = D().name;
+  $('diffname').style.color = D().tint;
+  A.resume(); A.danger = false; A.setTheme('courtyard', true); A.start();
   setState('play');
 }
 
 /* ------------------------- HUD ------------------------- */
 function buildBars() {
   var pb = $('pbar'), bb = $('bbar'), i, d;
-  for (i = 0; i < 20; i++) { d = document.createElement('div'); d.className = 'seg'; pb.appendChild(d); }
-  for (i = 0; i < 20; i++) { d = document.createElement('div'); d.className = 'seg'; bb.appendChild(d); }
+  pb.innerHTML = '';
+  for (i = 0; i < (P ? P.maxHp : 20); i++) { d = document.createElement('div'); d.className = 'seg'; pb.appendChild(d); }
+  if (!bb.children.length) {
+    for (i = 0; i < 20; i++) { d = document.createElement('div'); d.className = 'seg'; bb.appendChild(d); }
+  }
 }
 var lastHud = {};
 function updateHUD() {
@@ -199,7 +217,8 @@ function updateHUD() {
   if (lastHud.score !== G.score) { $('score').textContent = pad(G.score, 6); lastHud.score = G.score; }
   if (lastHud.hearts !== P.hearts) { $('hearts').textContent = pad(P.hearts, 2); lastHud.hearts = P.hearts; }
   if (lastHud.lives !== P.lives) { $('lives').textContent = pad(Math.max(0, P.lives), 2); lastHud.lives = P.lives; }
-  if (lastHud.sub !== P.sub) { $('subicon').textContent = P.sub ? P.sub.toUpperCase() : '—'; lastHud.sub = P.sub; }
+  var subTxt = P.sub ? (P.sub.toUpperCase() + (P.subMul > 1 ? ' x' + P.subMul : '')) : '—';
+  if (lastHud.sub !== subTxt) { $('subicon').textContent = subTxt; lastHud.sub = subTxt; }
   if (lastHud.whip !== P.whipLvl) { $('whiplvl').textContent = WHIPS[P.whipLvl].name; lastHud.whip = P.whipLvl; }
 
   var zi = 0;
@@ -275,13 +294,39 @@ function updateProgress(dt) {
     G.midbossStarted = true;
     sealMidArena();
     spawnMidBoss();
-    G.shake = 0.5; G.flash();
+    bossIntro();
   }
   if (!G.bossStarted && P.x > 233) {
     G.bossStarted = true;
     sealArena();
     spawnBoss();
-    G.shake = 0.6; G.flash();
+    bossIntro();
+  }
+}
+
+function bossIntro() {
+  G.cine = 2.1;
+  G.shake = 0.6;
+  G.flash();
+  A.sting();
+  G.card('', boss.name);
+  G.cardT = 2.4;
+}
+
+/* relight arena candles so a long boss fight never starves you of hearts */
+function respawnArenaCandles(dt) {
+  if (!boss || boss.dead) return;
+  G.candleT -= dt;
+  if (G.candleT > 0) return;
+  G.candleT = 7;
+  var lo = boss.kind === 'bat' ? 166 : 228, hi = boss.kind === 'bat' ? 180 : 268;
+  for (var i = 0; i < candles.length; i++) {
+    var c = candles[i];
+    if (!c.alive && c.x > lo && c.x < hi) {
+      c.alive = true; scene.add(c.g);
+      spawnParticles(c.x, c.y + 0.5, 1.2, 0xffd070, 8, 3, 0.5, 0.11);
+      return;
+    }
   }
 }
 
@@ -307,9 +352,19 @@ function frame(now) {
   }
   if (tap('restart') && (G.state === 'play' || G.state === 'pause')) startRun();
 
+  if (G.state === 'title' && (tap('left') || tap('right'))) {
+    diffIdx = (diffIdx + (input.left ? DIFFS.length - 1 : 1)) % DIFFS.length;
+    $('frame').innerHTML = FRAMES.title();
+    A.item();
+  }
+
   if (G.state === 'play') {
     if (G.freeze > 0) {
       G.freeze -= dt;                     // impact hit-stop
+    } else if (G.cine > 0) {
+      G.cine -= dt; G.t += dt;            // boss reveal
+      if (boss) updateBoss(dt);
+      if (G.cine <= 0 && boss) boss.t = 0;
     } else {
       G.t += dt; G.elapsed += dt;
       if (G.stopwatch > 0) {
@@ -326,6 +381,15 @@ function frame(now) {
       if (boss) updateBoss(dt);
       updateSpawns();
       updateProgress(dt);
+      respawnArenaCandles(dt);
+
+      // low-health tension: heartbeat, red edges, extra percussion
+      var low = P.hp > 0 && P.hp <= P.maxHp * 0.28;
+      A.danger = low;
+      if (low) {
+        G.beatT -= dt;
+        if (G.beatT <= 0) { G.beatT = 1.05; A.heartbeat(); }
+      } else G.beatT = 0;
     }
     updateCamera(dt);
     updateHUD();
@@ -333,6 +397,11 @@ function frame(now) {
     G.t += dt;
     if (G.state !== 'pause') updateCamera(dt);
   }
+
+  if (G.hurtFx > 0) G.hurtFx -= dt * 2.4;
+  var lowPulse = (G.state === 'play' && P.hp > 0 && P.hp <= P.maxHp * 0.28)
+    ? 0.18 + Math.sin(G.t * 6) * 0.1 : 0;
+  $('dmg').style.opacity = Math.max(0, Math.max(G.hurtFx, lowPulse)).toFixed(3);
 
   if (G.toastT > 0) { G.toastT -= dt; if (G.toastT <= 0) $('toast').style.opacity = '0'; }
   if (G.cardT > 0) { G.cardT -= dt; if (G.cardT <= 0) $('card').style.opacity = '0'; }

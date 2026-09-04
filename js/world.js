@@ -429,6 +429,91 @@ function window_(x, y, w, h) {
 }
 var beams = [];
 
+/* rose window of stained glass — the centrepiece of the throne room */
+function stainedGlass(x, y, r) {
+  var tex = cvs(256, 256, function (g, w, h) {
+    g.fillStyle = '#0b0d18'; g.fillRect(0, 0, w, h);
+    var cols = ['#c0304a', '#2f5fc0', '#c8a03a', '#2f8a5a', '#7a3ac0', '#c05a2a'];
+    var cx = w / 2, cy = h / 2;
+    for (var ring = 3; ring >= 1; ring--) {
+      var rad = (ring / 3) * (w / 2 - 6);
+      var seg = ring * 6;
+      for (var s = 0; s < seg; s++) {
+        g.beginPath();
+        g.moveTo(cx, cy);
+        g.arc(cx, cy, rad, (s / seg) * 6.283, ((s + 1) / seg) * 6.283);
+        g.closePath();
+        g.fillStyle = cols[(s + ring) % cols.length];
+        g.fill();
+        g.strokeStyle = '#0b0d18'; g.lineWidth = 5; g.stroke();
+      }
+    }
+    g.beginPath(); g.arc(cx, cy, w / 9, 0, 6.283);
+    g.fillStyle = '#f0e0a0'; g.fill();
+    g.strokeStyle = '#0b0d18'; g.lineWidth = 5; g.stroke();
+  });
+  var g2 = new THREE.Group();
+  var disc = new THREE.Mesh(new THREE.CircleGeometry(r, 40),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.92, fog: false }));
+  disc.position.z = -7.9; g2.add(disc);
+  var ring = new THREE.Mesh(new THREE.RingGeometry(r, r + 0.35, 40), MAT.iron);
+  ring.position.z = -7.8; g2.add(ring);
+  for (var s2 = 0; s2 < 8; s2++) {
+    var spoke = box(0.12, r * 2, 0.16, MAT.iron, 0, 0, -7.6);
+    spoke.rotation.z = (s2 / 8) * Math.PI; g2.add(spoke);
+  }
+  var gl = sprite(TEX.glowRed, r * 5, 0xff6a5a, 0.22); gl.position.z = -7; g2.add(gl);
+  var gl2 = sprite(TEX.glowBlue, r * 4, 0x88aaff, 0.18); gl2.position.z = -7; g2.add(gl2);
+
+  var beam = new THREE.Mesh(new THREE.PlaneGeometry(r * 2.4, 18),
+    new THREE.MeshBasicMaterial({
+      map: TEX.beam, transparent: true, opacity: 0.24, depthWrite: false,
+      blending: THREE.AdditiveBlending, fog: false, side: THREE.DoubleSide
+    }));
+  beam.position.set(0, -9.5, -5.6);
+  g2.add(beam); beams.push(beam);
+
+  g2.position.set(x, y, 0);
+  scene.add(g2);
+}
+
+/* runner of red carpet down the throne room */
+function carpet(left, right, y) {
+  var w = right - left;
+  // sits above the ledge cap so it never z-fights with the platform top
+  var c = box(w, 0.07, 3.4, new THREE.MeshLambertMaterial({ color: 0x6e1420 }), left + w / 2, y + 0.19, -1.2);
+  scene.add(c);
+  scene.add(box(w, 0.09, 0.3, MAT.gold, left + w / 2, y + 0.2, -2.85));
+  scene.add(box(w, 0.09, 0.3, MAT.gold, left + w / 2, y + 0.2, 0.45));
+}
+
+/* polished flagstones that catch the torchlight */
+function glossyFloor(left, right, y) {
+  var w = right - left;
+  var m = new THREE.Mesh(new THREE.PlaneGeometry(w, 3.4),
+    new THREE.MeshPhongMaterial({ color: 0x2a2c38, shininess: 90, specular: 0x8899bb }));
+  m.rotation.x = -Math.PI / 2;
+  m.position.set(left + w / 2, y + 0.15, -1.2);
+  scene.add(m);
+}
+
+/* tall standing candelabra */
+function candelabra(x, y) {
+  var g = new THREE.Group();
+  g.add(box(0.8, 0.16, 0.8, MAT.gold, 0, 0.08, 0));
+  g.add(box(0.18, 2.4, 0.18, MAT.gold, 0, 1.25, 0));
+  g.add(box(1.5, 0.14, 0.2, MAT.gold, 0, 2.4, 0));
+  for (var k = -1; k <= 1; k++) {
+    g.add(box(0.16, 0.34, 0.16, 0xe8e0c8 !== undefined ? MAT.gold : MAT.gold, k * 0.65, 2.62, 0));
+    var fl = sprite(TEX.glow, 1.1, 0xffc45a, 0.9);
+    fl.position.set(k * 0.65, 2.95, 0.1); g.add(fl);
+    flames.push({ x: x + k * 0.65, y: y + 2.95, fl: fl, ph: rnd(0, 9) });
+  }
+  g.position.set(x, y, 0.6);
+  scene.add(g);
+  torches.push({ x: x, y: y + 2.7, g: g });
+}
+
 function cobweb(x, y, flip) {
   var m = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.5),
     new THREE.MeshBasicMaterial({ map: TEX.web, transparent: true, opacity: 0.2, depthWrite: false, fog: false }));
@@ -598,8 +683,11 @@ function buildLevel() {
   addPlat(228.2, -5, 40, 5);                  // 228.2 .. 268.2
   addPlat(266, 0, 3, 14);                     // far wall
   pillar(236, 0, 11); pillar(258, 0, 11);
-  window_(247, 9, 5, 7.5);
-  banner(240, 6); banner(254, 6);
+  stainedGlass(247, 10.5, 3.6);
+  glossyFloor(228.2, 268, 0);
+  carpet(240, 268, 0);
+  candelabra(238.5, 0); candelabra(255.5, 0);
+  banner(232, 6); banner(262, 6);
   addPlat(238, 3.6, 4.5, 0.45, { oneway: true, mat: MAT.wood, depth: 2 });
   addPlat(253, 3.6, 4.5, 0.45, { oneway: true, mat: MAT.wood, depth: 2 });
   torch(233, 4.4); torch(243, 4.4); torch(251, 4.4); torch(262, 4.4);
@@ -655,7 +743,7 @@ function openMidArena() {
 /* =========================================================================
    WEATHER — rain in the courtyard, dust motes indoors, lightning
    ========================================================================= */
-var rainData = [], dustData = [];
+var rainData = [], dustData = [], leafData = [], leaves = null;
 function buildWeather() {
   var i, n = 260;
   for (i = 0; i < n; i++) rainData.push({ x: rnd(-18, 18), y: rnd(-6, 16), z: rnd(-9, 5), sp: rnd(17, 26) });
@@ -666,6 +754,16 @@ function buildWeather() {
   }));
   rain.frustumCulled = false;
   scene.add(rain);
+
+  var ln = 46;
+  for (i = 0; i < ln; i++) leafData.push({ x: rnd(-16, 16), y: rnd(-4, 16), z: rnd(-9, 3), s: rnd(0.9, 2.2), p: rnd(0, 9), r: rnd(0.4, 1.4) });
+  var lg = new THREE.BufferGeometry();
+  lg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(ln * 3), 3));
+  leaves = new THREE.Points(lg, new THREE.PointsMaterial({
+    color: 0x8a5a30, size: 0.22, transparent: true, opacity: 0.75, fog: false
+  }));
+  leaves.frustumCulled = false;
+  scene.add(leaves);
 
   var dn = 110;
   for (i = 0; i < dn; i++) dustData.push({ x: rnd(-14, 14), y: rnd(-4, 12), z: rnd(-7, 4), s: rnd(0.2, 0.7), p: rnd(0, 9) });
@@ -694,6 +792,27 @@ function updateWeather(dt, camX, camY) {
       arr[j + 3] = d.x - 0.15; arr[j + 4] = d.y - 0.8; arr[j + 5] = d.z;
     }
     rain.geometry.attributes.position.needsUpdate = true;
+    // droplets bursting on the stone underfoot
+    if (Math.random() < 0.75) {
+      var gy = camX > 71.6 ? 4.1 : 0;
+      spawnParticles(camX + rnd(-HALF_W, HALF_W), gy + 0.05, 0.6, 0x9fc0ff, 1, 1.5, 0.22, 0.07, -14);
+    }
+  }
+
+  // leaves tumbling through the courtyard
+  leaves.visible = wet > 0.02;
+  if (leaves.visible) {
+    leaves.material.opacity = 0.7 * wet;
+    var la = leaves.geometry.attributes.position.array;
+    for (var q = 0; q < leafData.length; q++) {
+      var lf = leafData[q];
+      lf.y -= lf.s * dt;
+      lf.x += Math.sin(wt * lf.r + lf.p) * dt * 2.2 - dt * 1.2;
+      if (lf.y < camY - 9) { lf.y = camY + 12; lf.x = camX + rnd(-16, 16); }
+      if (lf.x < camX - 17) lf.x = camX + 17;
+      la[q * 3] = lf.x; la[q * 3 + 1] = lf.y; la[q * 3 + 2] = lf.z;
+    }
+    leaves.geometry.attributes.position.needsUpdate = true;
   }
 
   var indoor = 1 - wet;
@@ -831,6 +950,10 @@ function updateWorld(dt, camX, camY) {
       decoLights[L].position.set(tt.x, tt.y + 0.6, 2.4);
       decoLights[L].intensity = 2.5 + Math.sin(wt * 13 + L) * 0.45;
       decoLights[L].color.setHex(0xff9130);
+      if (Math.random() < 0.045) {                 // embers drifting off the flame
+        spawnParticles(tt.x + rnd(-0.15, 0.15), tt.y + 0.6, 1.4,
+          Math.random() < 0.5 ? 0xffb040 : 0xff6a20, 1, 0.5, 1.1, 0.075, 1.6);
+      }
     } else decoLights[L].intensity = 0;
   }
 }

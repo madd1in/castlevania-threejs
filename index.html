@@ -18,6 +18,8 @@
     background:repeating-linear-gradient(180deg,rgba(0,0,0,.55) 0 1px,rgba(0,0,0,0) 1px 3px)}
   #grade{position:absolute;inset:0;pointer-events:none;z-index:10;mix-blend-mode:soft-light;
     background:linear-gradient(180deg,rgba(90,40,120,.35),rgba(0,0,0,0) 45%,rgba(180,50,30,.22))}
+  #dmg{position:absolute;inset:0;pointer-events:none;z-index:11;opacity:0;
+    background:radial-gradient(ellipse 70% 62% at 50% 50%,rgba(0,0,0,0) 42%,rgba(150,10,14,.55) 82%,rgba(190,20,20,.9) 100%)}
 
   /* ---------- HUD ---------- */
   #hud{position:absolute;left:0;right:0;top:0;padding:10px 14px;pointer-events:none;z-index:13;
@@ -76,6 +78,9 @@
   .press b{color:#ff6a4d}
   @keyframes blink{50%{opacity:.15}}
   .note{margin-top:16px;font-size:10px;color:#5d564a;letter-spacing:2px}
+  .diffpick{font-family:Georgia,serif;font-size:clamp(18px,3vw,30px);letter-spacing:7px;color:#6d6553}
+  .diffsub{font-family:"Consolas",monospace;font-size:11px;letter-spacing:2px;color:#9a917f;
+    margin-top:8px;line-height:1.9}
   .big{font-size:clamp(30px,6vw,64px);letter-spacing:8px;font-family:Georgia,serif;color:#c0392b;
     text-shadow:0 3px 0 #1a0508,0 0 30px rgba(200,40,30,.5)}
   .win{color:#e3b955;text-shadow:0 3px 0 #2a1a05,0 0 34px rgba(230,180,70,.5)}
@@ -89,6 +94,7 @@
   <canvas id="c"></canvas>
 
   <div id="grade"></div>
+  <div id="dmg"></div>
   <div id="vignette"></div>
   <div id="scanlines"></div>
 
@@ -109,6 +115,7 @@
         <div class="stat"><i>HEARTS</i><b id="hearts">08</b></div>
         <div class="stat"><i>SUB</i><b id="subicon">—</b></div>
         <div class="stat"><i>LIVES</i><b id="lives">04</b></div>
+        <div class="stat" id="diffrow"><i>MODE</i><b id="diffname">HUNTER</b></div>
       </div>
     </div>
     <div id="bossrow">

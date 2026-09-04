@@ -12,6 +12,16 @@ var BOSS_GATE = 228, BOSS_CAM = 246;
 var MIDBOSS_X = 169, MIDBOSS_CAM = 173.5;
 var COYOTE = 0.13, JUMP_BUFFER = 0.14;
 
+/* ------------------------- difficulty ------------------------- */
+var DIFFS = [
+  { name: 'FLEDGLING', hp: 26, lives: 6, dmg: 0.5, bossHp: 0.6, bossDmg: 0.5, hearts: 12, tint: '#7fd48a' },
+  { name: 'HUNTER', hp: 20, lives: 4, dmg: 1.0, bossHp: 1.0, bossDmg: 1.0, hearts: 8, tint: '#e5d3a2' },
+  { name: 'NIGHTMARE', hp: 16, lives: 2, dmg: 1.6, bossHp: 1.35, bossDmg: 1.5, hearts: 5, tint: '#e0554a' }
+];
+var diffIdx = 0;
+function D() { return DIFFS[diffIdx]; }
+function edmg(base) { return Math.max(1, Math.round(base * D().dmg)); }
+
 /* ------------------------- helpers ------------------------- */
 function rnd(a, b) { return a + Math.random() * (b - a); }
 function irnd(a, b) { return Math.floor(rnd(a, b + 1)); }
@@ -102,19 +112,37 @@ var THEMES = {
            76, 0, 75, 0, 76, 75, 76, 79, 81, 80, 79, 78, 77, 76, 75, 74]
   },
   midboss: {
-    tempo: 0.155, drums: 2, leadGain: 0.12,
+    tempo: 0.155, drums: 2, leadGain: 0.12, organ: 1,
     bass: [45, 45, 45, 52, 45, 44, 43, 42, 41, 41, 41, 48, 41, 40, 39, 38,
            45, 45, 45, 52, 45, 44, 43, 42, 47, 47, 47, 54, 47, 46, 45, 44],
     arp:  [57, 60, 64, 60, 57, 60, 64, 60, 53, 57, 60, 57, 53, 57, 60, 57,
            57, 60, 64, 60, 57, 60, 64, 60, 59, 62, 66, 62, 59, 62, 66, 62],
     mel:  [81, 0, 79, 0, 81, 79, 81, 84, 79, 0, 77, 0, 79, 77, 79, 81,
            81, 0, 79, 0, 81, 79, 81, 84, 86, 84, 83, 81, 79, 77, 76, 74]
+  },
+  victory: {
+    tempo: 0.20, drums: 1, leadGain: 0.13, organ: 1,
+    bass: [36, 36, 43, 36, 36, 36, 43, 36, 41, 41, 48, 41, 41, 41, 48, 41,
+           38, 38, 45, 38, 38, 38, 45, 38, 43, 43, 50, 43, 31, 31, 43, 43],
+    arp:  [48, 52, 55, 52, 48, 52, 55, 52, 53, 57, 60, 57, 53, 57, 60, 57,
+           50, 53, 57, 53, 50, 53, 57, 53, 55, 59, 62, 59, 55, 59, 62, 59],
+    mel:  [72, 0, 76, 0, 79, 0, 84, 0, 81, 0, 79, 0, 77, 0, 76, 0,
+           74, 0, 77, 0, 81, 0, 79, 77, 79, 0, 81, 0, 84, 0, 0, 0]
+  },
+  gameover: {
+    tempo: 0.34, drums: 0, pad: 1, organ: 1, leadGain: 0.09,
+    bass: [45, 0, 0, 0, 44, 0, 0, 0, 43, 0, 0, 0, 41, 0, 0, 0,
+           40, 0, 0, 0, 39, 0, 0, 0, 38, 0, 0, 0, 33, 0, 0, 0],
+    arp:  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+           0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    mel:  [69, 0, 0, 68, 0, 0, 67, 0, 0, 65, 0, 0, 64, 0, 0, 0,
+           63, 0, 0, 62, 0, 0, 61, 0, 0, 60, 0, 0, 57, 0, 0, 0]
   }
 };
 
 var A = {
   ctx: null, master: null, mg: null, sg: null, fx: null, noise: null,
-  on: true, playing: false, step: 0, next: 0, timer: null,
+  on: true, playing: false, step: 0, next: 0, timer: null, bar: 0, danger: false,
   theme: THEMES.courtyard, themeName: 'courtyard', pendingTheme: null,
 
   init: function () {
@@ -204,6 +232,40 @@ var A = {
       self.tone(f / 2, 0.34, 'triangle', 0.12, c + i * 0.17);
     });
   },
+  /* dramatic hit when a boss reveals itself */
+  sting: function () {
+    if (!this.ctx || !this.on) return;
+    var c = this.ctx.currentTime, self = this;
+    [41, 44, 48].forEach(function (m) {
+      self.tone(self.f(m), 2.2, 'sawtooth', 0.13, c, 0, self.mg);
+      self.tone(self.f(m + 12), 2.0, 'square', 0.05, c, 0, self.mg);
+    });
+    this.hiss(1.6, 0.3, 4000, 120, c, 0.5);
+    [0, 0.16, 0.32].forEach(function (d, i) {
+      self.tone(self.f(69 - i * 5), 0.5, 'square', 0.13, c + d, 0, self.fx);
+    });
+  },
+  crystal: function () {
+    var c = this.ctx ? this.ctx.currentTime : 0, self = this;
+    [1047, 1319, 1568, 2093, 2637].forEach(function (f, i) {
+      self.tone(f, 0.5, 'sine', 0.14, c + i * 0.05, 0, self.fx);
+      self.tone(f, 0.3, 'triangle', 0.1, c + i * 0.05);
+    });
+    this.hiss(0.6, 0.16, 6000, 1200, c, 2);
+  },
+  heartbeat: function () {
+    if (!this.ctx || !this.on) return;
+    var c = this.ctx.currentTime, self = this;
+    [0, 0.17].forEach(function (d, i) {
+      var o = self.ctx.createOscillator(), g = self.ctx.createGain();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(78, c + d);
+      o.frequency.exponentialRampToValueAtTime(32, c + d + 0.16);
+      g.gain.setValueAtTime(i ? 0.22 : 0.32, c + d);
+      g.gain.exponentialRampToValueAtTime(0.0001, c + d + 0.2);
+      o.connect(g); g.connect(self.master); o.start(c + d); o.stop(c + d + 0.22);
+    });
+  },
 
   /* ---- sequencer ---- */
   setTheme: function (name, immediate) {
@@ -229,6 +291,7 @@ var A = {
       }
       this.beat(this.step, this.next);
       this.step = (this.step + 1) % 32;
+      if (this.step === 0) this.bar++;
       this.next += this.theme.tempo;
     }
   },
@@ -252,8 +315,28 @@ var A = {
       this.tone(this.f(b + 12), tp * 7.5, 'sine', 0.05, t, 0, this.mg);
       this.tone(this.f(b + 19), tp * 7.5, 'sine', 0.035, t, 0, this.mg);
     }
+    // cathedral organ chord, sustained across each half-bar
+    if (T.organ && s % 8 === 0 && b) {
+      var self = this;
+      [0, 7, 12, 15].forEach(function (iv, k) {
+        self.tone(self.f(b + 12 + iv), tp * 7.6, 'sawtooth', 0.026 - k * 0.004, t, 0, self.mg);
+      });
+    }
+    // low drone that creeps in when the player is nearly dead
+    if (this.danger && s % 8 === 0) {
+      this.tone(this.f(b ? b - 12 : 28), tp * 8.2, 'sawtooth', 0.07, t, 0, this.mg);
+    }
     if (!T.drums) return;
 
+    var fill = this.danger || (s >= 28 && Math.floor(this.bar || 0) % 4 === 3);
+    if (fill && s >= 28) {                                          // end-of-phrase tom fill
+      var fo = this.ctx.createOscillator(), fg = this.ctx.createGain();
+      fo.type = 'triangle';
+      fo.frequency.setValueAtTime(220 - (s - 28) * 34, t);
+      fo.frequency.exponentialRampToValueAtTime(70, t + 0.12);
+      fg.gain.setValueAtTime(0.2, t); fg.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
+      fo.connect(fg); fg.connect(this.mg); fo.start(t); fo.stop(t + 0.16);
+    }
     if (s % 4 === 0 || (T.drums === 2 && s % 8 === 6)) {           // kick
       var kg = this.ctx.createGain(), ko = this.ctx.createOscillator();
       ko.type = 'sine';
@@ -269,7 +352,7 @@ var A = {
       sg2.gain.setValueAtTime(0.16, t); sg2.gain.exponentialRampToValueAtTime(0.0001, t + 0.13);
       sn.connect(bp); bp.connect(sg2); sg2.connect(this.mg); sn.start(t); sn.stop(t + 0.15);
     }
-    if (s % 2 === 1) {                                             // hat
+    if (s % 2 === 1 || this.danger) {                              // hat
       var hn = this.ctx.createBufferSource(); hn.buffer = this.noise;
       var hp = this.ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 7500;
       var hg = this.ctx.createGain();

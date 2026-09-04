@@ -107,7 +107,7 @@ function createPlayer() {
     face: 1, onGround: false, onOneway: false, dropping: 0, ride: null,
     hp: 20, maxHp: 20, hearts: 8, lives: 4,
     jumps: 0, maxJumps: 2, coyote: 0, buffer: 0, spin: 0, crouch: false,
-    whipLvl: 0, sub: null,
+    whipLvl: 0, sub: null, subMul: 1,
     atk: 0, atkCool: 0, inv: 0, dead: false, deadT: 0,
     walkT: 0, g: g, whip: whip, torch: torch, checkpoint: { x: 3, y: 2 }
   };
@@ -128,6 +128,7 @@ function playerHurt(dmg, fromX) {
   P.inv = 1.5;
   A.hurt();
   G.shake = 0.35;
+  G.hurtFx = 1;
   G.hitstop(0.05);
   G.combo = 0;
   spawnParticles(P.x, P.y, 0.8, 0xc0392b, 12, 5, 0.5, 0.14);
@@ -345,24 +346,26 @@ function breakCandle(c) {
   spawnParticles(c.x, c.y + 0.5, 1.2, 0xffd070, 14, 4.5, 0.55, 0.13);
   G.addScore(100);
   var r = Math.random(), type;
-  if (r < 0.34) type = 'heart';
-  else if (r < 0.50) type = 'bigheart';
-  else if (r < 0.60) type = 'money';
-  else if (r < 0.70) type = 'meat';
-  else if (r < 0.78) type = 'dagger';
-  else if (r < 0.84) type = 'axe';
-  else if (r < 0.89) type = 'cross';
-  else if (r < 0.93) type = 'holy';
-  else if (r < 0.96) type = 'watch';
+  if (r < 0.32) type = 'heart';
+  else if (r < 0.47) type = 'bigheart';
+  else if (r < 0.56) type = 'money';
+  else if (r < 0.66) type = 'meat';
+  else if (r < 0.73) type = 'dagger';
+  else if (r < 0.79) type = 'axe';
+  else if (r < 0.84) type = 'cross';
+  else if (r < 0.88) type = 'holy';
+  else if (r < 0.91) type = 'watch';
+  else if (r < 0.96) type = 'double';
   else type = 'whip';
   if (type === 'whip' && P.whipLvl >= 2) type = 'bigheart';
+  if (type === 'double' && P.subMul >= 3) type = 'bigheart';
   dropItem(c.x, c.y + 0.5, type);
 }
 
 var ITEM_COL = {
   heart: 0xe23b4a, bigheart: 0xff5a6a, money: 0xf0c040, meat: 0xc06a3a,
   dagger: 0xc8d0dc, axe: 0x9aa4b4, cross: 0xe8d48a, holy: 0x6ad0ff,
-  watch: 0xd8c8a0, whip: 0xd8c27a
+  watch: 0xd8c8a0, whip: 0xd8c27a, double: 0xffd76a, crystal: 0x9ae8ff
 };
 
 function dropItem(x, y, type) {
@@ -395,11 +398,18 @@ function dropItem(x, y, type) {
     g.add(colorBox(0.4, 0.4, 0.16, col, 0, 0, 0));
     g.add(colorBox(0.12, 0.12, 0.2, 0x6a5a3a, 0, 0.24, 0));
     g.add(colorBox(0.2, 0.05, 0.2, 0x3a3020, 0.04, 0.02, 0.1));
+  } else if (type === 'double') {
+    g.add(colorBox(0.16, 0.5, 0.16, col, -0.14, 0, 0));
+    g.add(colorBox(0.16, 0.5, 0.16, col, 0.14, 0, 0));
+  } else if (type === 'crystal') {
+    var oct = new THREE.Mesh(new THREE.OctahedronGeometry(0.42),
+      new THREE.MeshLambertMaterial({ color: col, emissive: 0x1a4a6a, transparent: true, opacity: 0.9 }));
+    g.add(oct);
   } else {
     g.add(colorBox(0.6, 0.14, 0.14, col, 0, 0, 0));
     g.add(colorBox(0.2, 0.2, 0.2, 0xffe8a0, 0.34, 0, 0));
   }
-  var gl = sprite(TEX.glow, 1.5, col, 0.55);
+  var gl = sprite(TEX.glow, type === 'crystal' ? 3 : 1.5, col, type === 'crystal' ? 0.8 : 0.55);
   gl.position.z = -0.2; g.add(gl);
   g.position.set(x, y, 1.1);
   scene.add(g);
@@ -432,6 +442,22 @@ function pickItem(it) {
     case 'whip':
       if (P.whipLvl < 2) { P.whipLvl++; A.power(); G.toast(WHIPS[P.whipLvl].name + '!'); G.flash(); }
       else { P.hearts += 6; A.item(); }
+      break;
+    case 'double':
+      if (P.subMul < 3) { P.subMul++; A.power(); G.toast(P.subMul === 2 ? 'DOUBLE SHOT' : 'TRIPLE SHOT'); G.flash(); }
+      else { P.hearts += 6; A.item(); }
+      break;
+    case 'crystal':
+      A.crystal(); G.flash(); G.shake = 0.6;
+      G.addScore(3000); G.toast('CRYSTAL  +3000');
+      for (var q = enemies.length - 1; q >= 0; q--) {
+        spawnParticles(enemies[q].x, enemies[q].y, 0.8, 0x9ae8ff, 12, 6, 0.6, 0.15);
+        killEnemy(enemies[q]);
+      }
+      for (var w = 0; w < 40; w++) {
+        spawnParticles(P.x, P.y + 0.4, 1.4, 0x9ae8ff, 1, 13, 0.8, 0.14, -3);
+      }
+      spawnRing(P.x, P.y, 0x9ae8ff);
       break;
     default:
       P.sub = it.type; A.power(); G.toast(it.type.toUpperCase());
@@ -477,9 +503,10 @@ function makeProj(kind, x, y, vx, vy, friendly) {
     g.add(colorBox(0.4, 0.32, 0.14, 0x8a94a4, 0.2, 0.2, 0));
     col = 0x8a94a4; grav = -19; dmg = 2; breakable = true;
   } else { /* fireball */
-    g.add(colorBox(0.42, 0.42, 0.42, 0xffe0a0, 0, 0, 0));
+    g.add(colorBox(0.38, 0.38, 0.38, 0xffe0a0, 0, 0, 0));
     g.add(sprite(TEX.glowRed, 2.2, 0xff5522, 0.9));
-    col = 0xff5522; w = 0.55; h = 0.55; dmg = 2; life = 5;
+    col = 0xff5522; w = 0.5; h = 0.5; dmg = 2; life = 5;
+    breakable = true;                      // the whip can swat fireballs away
   }
   if (kind !== 'fireball' && kind !== 'flame') {
     var gl2 = sprite(TEX.glow, 1.1, col, 0.35); gl2.position.z = -0.15; g.add(gl2);
@@ -488,8 +515,8 @@ function makeProj(kind, x, y, vx, vy, friendly) {
   scene.add(g);
   var pr = {
     kind: kind, x: x, y: y, vx: vx, vy: vy, w: w, h: h, g: g, grav: grav,
-    dmg: dmg, friendly: !!friendly, breakable: breakable, life: life, t: 0,
-    dead: false, col: col, tickT: 0
+    dmg: friendly ? dmg : edmg(dmg), friendly: !!friendly, breakable: breakable,
+    life: life, t: 0, dead: false, col: col, tickT: 0, trailT: 0
   };
   projectiles.push(pr);
   return pr;
@@ -498,17 +525,20 @@ function makeProj(kind, x, y, vx, vy, friendly) {
 function throwSub(kind) {
   var ox = P.x + P.face * 0.6, oy = P.y + 0.25;
   if (kind === 'watch') {
-    G.stopwatch = 4.5; A.tick(); G.toast('TIME STOP'); G.flash();
+    G.stopwatch = 4.5 + P.subMul; A.tick(); G.toast('TIME STOP'); G.flash();
     for (var i = 0; i < 26; i++) spawnParticles(P.x, P.y, 0.9, 0xd8e8ff, 1, 7, 0.7, 0.13, -2);
     return;
   }
   A.throwit();
-  if (kind === 'dagger') makeProj('dagger', ox, oy, P.face * 15, 0, true);
-  else if (kind === 'axe') makeProj('axe', ox, oy, P.face * 6.2, 13.5, true);
-  else if (kind === 'holy') makeProj('holy', ox, oy, P.face * 5.5, 4.5, true);
-  else {
-    var c = makeProj('cross', ox, oy, P.face * 11, 0, true);
-    c.boomerang = true; c.pierce = true; c.dir = P.face;
+  for (var k = 0; k < P.subMul; k++) {
+    var sp = (k - (P.subMul - 1) / 2);            // fan the extra shots out
+    if (kind === 'dagger') makeProj('dagger', ox, oy + sp * 0.5, P.face * 15, sp * 1.2, true);
+    else if (kind === 'axe') makeProj('axe', ox, oy, P.face * (6.2 + sp * 1.8), 13.5 - Math.abs(sp) * 1.2, true);
+    else if (kind === 'holy') makeProj('holy', ox, oy, P.face * (5.5 + sp * 2.4), 4.5, true);
+    else {
+      var c = makeProj('cross', ox, oy + sp * 0.6, P.face * 11, 0, true);
+      c.boomerang = true; c.pierce = true; c.dir = P.face;
+    }
   }
 }
 
@@ -547,7 +577,12 @@ function updateProjectiles(dt) {
     else if (pr.kind === 'fireball') {
       pr.g.rotation.z += dt * 8;
       pr.g.scale.setScalar(1 + Math.sin(pr.t * 22) * 0.12);
-      if (Math.random() < 0.5) spawnParticles(pr.x, pr.y, 0.8, 0xff7a30, 1, 1.2, 0.3, 0.12, -2);
+      pr.trailT -= dt;
+      if (pr.trailT <= 0) {                       // comet tail
+        pr.trailT = 0.022;
+        spawnParticles(pr.x - pr.vx * 0.02, pr.y - pr.vy * 0.02, 0.75,
+          Math.random() < 0.4 ? 0xffd070 : 0xff5a22, 1, 0.7, 0.42, 0.19, 1.5);
+      }
     }
 
     // holy water shatters into a flame pool on impact
@@ -683,7 +718,7 @@ function spawnEnemy(type, x, y, def) {
   scene.add(g);
   var e = {
     type: type, x: x, y: y, vx: 0, vy: 0, w: st.w, h: st.h,
-    hp: st.hp, maxHp: st.hp, score: st.score, dmg: st.dmg, fly: st.fly,
+    hp: st.hp, maxHp: st.hp, score: st.score, dmg: edmg(st.dmg), fly: st.fly,
     g: g, face: -1, t: rnd(0, 5), cd: rnd(0.8, 2.4), dead: false, hitCd: 0,
     y0: y, awake: type !== 'bat', def: def, dropping: 0, onGround: false
   };
@@ -879,10 +914,12 @@ function spawnMidBoss() {
   var g = buildGiantBat();
   g.position.set(MIDBOSS_CAM, 8, 0);
   scene.add(g);
+  var hp = Math.round(20 * D().bossHp);
   boss = {
     kind: 'bat', name: 'GIANT BAT', x: MIDBOSS_CAM, y: 8, w: 1.7, h: 1.3,
-    hp: 26, maxHp: 26, g: g, state: 'hover', t: 0, vuln: true, hitCd: 0,
-    dead: false, deadT: 0, alpha: 1, tx: MIDBOSS_CAM, camX: MIDBOSS_CAM
+    hp: hp, maxHp: hp, g: g, state: 'hover', t: 0, vuln: true, hitCd: 0,
+    dead: false, deadT: 0, alpha: 1, tx: MIDBOSS_CAM, camX: MIDBOSS_CAM,
+    touch: Math.max(1, Math.round(2 * D().bossDmg)), charge: 0
   };
   A.setTheme('midboss', true);
   G.toast('GIANT BAT');
@@ -893,11 +930,12 @@ function spawnBoss() {
   var g = buildDracula();
   g.position.set(BOSS_SPOTS[2][0], BOSS_SPOTS[2][1], 0);
   scene.add(g);
+  var hp = Math.round(26 * D().bossHp);
   boss = {
     kind: 'dracula', name: 'COUNT DRACULA', x: BOSS_SPOTS[2][0], y: BOSS_SPOTS[2][1],
-    w: 1.5, h: 2.6, hp: 34, maxHp: 34, g: g, state: 'appear', t: 0, vuln: false,
+    w: 1.5, h: 2.6, hp: hp, maxHp: hp, g: g, state: 'appear', t: 0, vuln: false,
     hitCd: 0, dead: false, deadT: 0, shots: 0, spot: 2, phase2: false, alpha: 0,
-    camX: BOSS_CAM
+    camX: BOSS_CAM, touch: Math.max(1, Math.round(2 * D().bossDmg)), charge: 0
   };
   A.setTheme('boss', true);
   G.toast('WHAT IS A MAN?');
@@ -926,6 +964,8 @@ function damageBoss(dmg) {
   if (boss.kind === 'dracula' && !boss.phase2 && boss.hp <= boss.maxHp * 0.5) {
     boss.phase2 = true;
     G.toast('THE NIGHT DEEPENS');
+    dropItem(P.x + 1.5, 4, 'meat');            // a breather at the halfway mark
+    dropItem(P.x - 1.5, 4, 'bigheart');
   }
   if (boss.hp <= 0) {
     boss.hp = 0; boss.dead = true; boss.deadT = 0; boss.vuln = false;
@@ -946,7 +986,7 @@ function updateBoss(dt) {
 
 function updateGiantBat(dt) {
   var g = boss.g;
-  g.userData.aura.material.opacity = boss.dead ? 0 : 0.16 + Math.sin(G.t * 6) * 0.06;
+  if (boss.state !== 'telegraph') g.userData.aura.material.opacity = boss.dead ? 0 : 0.16 + Math.sin(G.t * 6) * 0.06;
 
   if (boss.dead) {
     boss.deadT += dt;
@@ -962,7 +1002,8 @@ function updateGiantBat(dt) {
       G.midbossDone = true;
       dropItem(MIDBOSS_CAM, 3, 'meat');
       dropItem(MIDBOSS_CAM + 1.6, 3, 'whip');
-      dropItem(MIDBOSS_CAM - 1.6, 3, 'bigheart');
+      dropItem(MIDBOSS_CAM - 1.6, 3, 'double');
+      dropItem(MIDBOSS_CAM + 3.2, 3, 'crystal');
       G.addScore(5000);
       G.toast('+5000');
       A.setTheme('chasm', true);
@@ -979,22 +1020,27 @@ function updateGiantBat(dt) {
     case 'hover':
       boss.x = lerp(boss.x, boss.tx, Math.min(1, dt * 2.2));
       boss.y = lerp(boss.y, 7.6 + Math.sin(boss.t * 2.4) * 0.7, Math.min(1, dt * 3));
-      if (boss.t > 1.5) {
-        boss.state = 'swoop'; boss.t = 0;
+      if (boss.t > 1.7 && G.cine <= 0) {
+        boss.state = 'telegraph'; boss.t = 0;
         boss.sx = P.x; boss.sy = Math.max(1.3, P.y - 0.1);
         A.screech();
       }
       break;
+    case 'telegraph':                             // pauses and glows before diving
+      boss.g.userData.aura.material.opacity = 0.2 + boss.t * 1.2;
+      if (Math.random() < 0.4) spawnParticles(boss.x, boss.y, 0.9, 0xaa2020, 1, 2.5, 0.4, 0.12, 3);
+      if (boss.t > 0.55) { boss.state = 'swoop'; boss.t = 0; }
+      break;
     case 'swoop': {
       var dx = boss.sx - boss.x, dy = boss.sy - boss.y;
       var d = Math.max(0.001, Math.hypot(dx, dy));
-      var sp = 13;
+      var sp = 10.5;
       boss.x += (dx / d) * sp * dt;
       boss.y += (dy / d) * sp * dt;
       if (d < 0.8 || boss.t > 1.4) {
         boss.state = 'rise'; boss.t = 0;
         boss.tx = clamp(P.x + rnd(-4, 4), MIDBOSS_CAM - 4, MIDBOSS_CAM + 4);
-        if (Math.random() < 0.5) {
+        if (Math.random() < 0.32) {
           for (var i = 0; i < 2; i++) {
             var b = spawnEnemy('bat', boss.x + rnd(-1, 1), boss.y);
             b.awake = true;
@@ -1016,7 +1062,7 @@ function updateGiantBat(dt) {
   g.rotation.z = boss.state === 'swoop' ? -0.25 : 0;
   g.visible = boss.hitCd > 0 ? (Math.floor(boss.hitCd * 40) % 2 === 0) : true;
 
-  if (!P.dead && P.inv <= 0 && hits(boss, P)) playerHurt(2, boss.x);
+  if (!P.dead && P.inv <= 0 && hits(boss, P)) playerHurt(boss.touch, boss.x);
 }
 
 function updateDracula(dt) {
@@ -1044,39 +1090,62 @@ function updateDracula(dt) {
   g.position.y = boss.y + Math.sin(G.t * 2.2) * 0.14;
   g.visible = boss.hitCd > 0 ? (Math.floor(boss.hitCd * 40) % 2 === 0) : true;
 
+  // the charge glow telegraphs every volley so it can be read and dodged
+  if (boss.charge > 0) {
+    boss.charge -= dt;
+    var ck = 1 - boss.charge / 0.62;
+    g.userData.aura.material.opacity = (0.25 + ck * 0.75) * boss.alpha;
+    g.userData.aura.scale.setScalar(6 * (1 + ck * 0.5));
+    if (Math.random() < 0.55) {
+      spawnParticles(boss.x + dir * 0.8, boss.y + 1.3, 0.9, 0xff5522, 1, 3.2, 0.35, 0.12, 6);
+    }
+  } else g.userData.aura.scale.setScalar(6);
+
   switch (boss.state) {
     case 'appear':
       setBossAlpha(clamp(boss.t / 0.7, 0, 1));
-      if (boss.t > 0.7) { boss.state = 'idle'; boss.t = 0; boss.vuln = true; boss.shots = 0; }
+      if (boss.t > 0.7 && G.cine <= 0) { boss.state = 'idle'; boss.t = 0; boss.vuln = true; boss.shots = 0; }
       break;
-    case 'idle':
-      if (boss.t > (boss.phase2 ? 0.6 : 0.95)) { boss.state = 'cast'; boss.t = 0; }
+
+    case 'idle':                                   // generous window to land hits
+      if (boss.t > (boss.phase2 ? 1.0 : 1.35)) {
+        boss.state = 'charge'; boss.t = 0; boss.charge = 0.62; A.hiss(0.6, 0.12, 200, 1400, 0, 0.9);
+      }
       break;
+
+    case 'charge':
+      if (boss.t > 0.62) { boss.state = 'cast'; boss.t = 0.99; }
+      break;
+
     case 'cast': {
-      var interval = boss.phase2 ? 0.24 : 0.34;
-      var max = boss.phase2 ? 5 : 3;
+      var interval = boss.phase2 ? 0.34 : 0.44;
+      var max = boss.phase2 ? 3 : 2;
       if (boss.t > interval) {
         boss.t = 0; boss.shots++;
         var px = P.x - boss.x, py = (P.y + 0.3) - (boss.y + 1.3);
         var len = Math.max(1, Math.hypot(px, py));
-        var spread = (boss.shots - (max + 1) / 2) * 0.20;
+        var spread = (boss.shots - (max + 1) / 2) * 0.22;
         var ca = Math.cos(spread), sa = Math.sin(spread);
         var ux = (px / len) * ca - (py / len) * sa;
         var uy = (px / len) * sa + (py / len) * ca;
-        var sp = boss.phase2 ? 9 : 7.6;
+        var sp = boss.phase2 ? 7.2 : 6.2;
         makeProj('fireball', boss.x + dir * 0.8, boss.y + 1.3, ux * sp, uy * sp, false);
         A.fire();
-        if (boss.shots >= max) {
-          boss.shots = 0;
-          boss.state = boss.phase2 && Math.random() < 0.45 ? 'summon' : 'vanish';
-          boss.t = 0;
-        }
+        if (boss.shots >= max) { boss.shots = 0; boss.state = 'recover'; boss.t = 0; }
       }
       break;
     }
+
+    case 'recover':                                // stays put and hittable after a volley
+      if (boss.t > 0.9) {
+        boss.state = boss.phase2 && Math.random() < 0.35 ? 'summon' : 'vanish';
+        boss.t = 0;
+      }
+      break;
+
     case 'summon':
       if (boss.t > 0.1) {
-        for (var i = 0; i < 3; i++) {
+        for (var i = 0; i < 2; i++) {
           var e = spawnEnemy('bat', boss.x + rnd(-1.5, 1.5), boss.y + rnd(1, 2.6));
           e.awake = true;
         }
@@ -1084,22 +1153,34 @@ function updateDracula(dt) {
         boss.state = 'vanish'; boss.t = 0;
       }
       break;
+
     case 'vanish':
       boss.vuln = false;
       setBossAlpha(clamp(1 - boss.t / 0.45, 0, 1));
-      if (boss.t < dt * 1.5) spawnParticles(boss.x, boss.y + 1, 0.8, 0x6b0f18, 18, 5, 0.6, 0.16, -2);
+      if (boss.t < dt * 1.5) teleportSmoke(boss.x, boss.y);
       if (boss.t > 0.45) {
-        var s;
-        do { s = irnd(0, BOSS_SPOTS.length - 1); } while (s === boss.spot);
+        var s, tries = 0;
+        do { s = irnd(0, BOSS_SPOTS.length - 1); tries++; }
+        while (tries < 12 && (s === boss.spot || Math.abs(BOSS_SPOTS[s][0] - P.x) < 3.5));
         boss.spot = s;
         boss.x = BOSS_SPOTS[s][0]; boss.y = BOSS_SPOTS[s][1];
         g.position.set(boss.x, boss.y, 0);
-        spawnParticles(boss.x, boss.y + 1, 0.8, 0x6b0f18, 18, 5, 0.6, 0.16, -2);
+        teleportSmoke(boss.x, boss.y);
         A.fire();
         boss.state = 'appear'; boss.t = 0;
       }
       break;
   }
 
-  if (!P.dead && P.inv <= 0 && boss.alpha > 0.5 && hits(boss, P)) playerHurt(2, boss.x);
+  if (!P.dead && P.inv <= 0 && boss.alpha > 0.5 && hits(boss, P)) playerHurt(boss.touch, boss.x);
+}
+
+/* swirling column of smoke where the count materialises */
+function teleportSmoke(x, y) {
+  for (var i = 0; i < 26; i++) {
+    var a = (i / 26) * Math.PI * 2;
+    spawnParticles(x + Math.cos(a) * 0.7, y + 0.3 + (i / 26) * 2.6, 0.9,
+      i % 3 === 0 ? 0xc02030 : 0x3a0a12, 1, 3.5, 0.75, 0.2, 2.5);
+  }
+  spawnRing(x, y + 0.4, 0xc02030);
 }
