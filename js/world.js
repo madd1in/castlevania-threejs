@@ -328,12 +328,13 @@ function buildSky() {
     skyGroup.add(cl);
   }
 
-  // forked lightning, redrawn on every strike (one draw call, only while lit)
+  // forked lightning, redrawn on every strike (one draw call, only while lit).
+  // Hairlines are invisible at high DPI, so each segment is a thin quad.
   var bg = new THREE.BufferGeometry();
-  bg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(BOLT_SEGS * 6), 3));
-  bolt = new THREE.LineSegments(bg, new THREE.LineBasicMaterial({
+  bg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(BOLT_SEGS * 18), 3));
+  bolt = new THREE.Mesh(bg, new THREE.MeshBasicMaterial({
     color: 0xdfeaff, transparent: true, opacity: 0, fog: false,
-    blending: THREE.AdditiveBlending, depthWrite: false
+    blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
   }));
   bolt.frustumCulled = false;
   bolt.visible = false;
@@ -875,28 +876,40 @@ function openMidArena() {
 /* ------------------------- lightning + shooting stars ------------------------- */
 function strikeBolt() {
   var arr = bolt.geometry.attributes.position.array;
-  var x = rnd(-26, 26), y = 52, i, seg = 0;
-  for (i = 0; i < BOLT_SEGS && seg < BOLT_SEGS; i++) {
-    var nx = x + rnd(-2.6, 2.6), ny = y - rnd(1.6, 3.4);
-    var o = seg * 6;
-    arr[o] = x; arr[o + 1] = y; arr[o + 2] = -50;
-    arr[o + 3] = nx; arr[o + 4] = ny; arr[o + 5] = -50;
+  var seg = 0, hw = 0.13;
+
+  function quad(x0, y0, x1, y1, w) {
+    if (seg >= BOLT_SEGS) return;
+    var dx = x1 - x0, dy = y1 - y0, len = Math.max(0.001, Math.hypot(dx, dy));
+    var nx = (dy / len) * w, ny = (-dx / len) * w, o = seg * 18, z = -50;
+    // two triangles: (a,b,c) and (a,c,d)
+    var ax = x0 - nx, ay = y0 - ny, bx = x0 + nx, by = y0 + ny;
+    var cx = x1 + nx, cy = y1 + ny, dx2 = x1 - nx, dy2 = y1 - ny;
+    arr[o] = ax; arr[o + 1] = ay; arr[o + 2] = z;
+    arr[o + 3] = bx; arr[o + 4] = by; arr[o + 5] = z;
+    arr[o + 6] = cx; arr[o + 7] = cy; arr[o + 8] = z;
+    arr[o + 9] = ax; arr[o + 10] = ay; arr[o + 11] = z;
+    arr[o + 12] = cx; arr[o + 13] = cy; arr[o + 14] = z;
+    arr[o + 15] = dx2; arr[o + 16] = dy2; arr[o + 17] = z;
     seg++;
-    // occasional fork
-    if (seg < BOLT_SEGS && Math.random() < 0.22) {
-      var o2 = seg * 6;
-      arr[o2] = nx; arr[o2 + 1] = ny; arr[o2 + 2] = -50;
-      arr[o2 + 3] = nx + rnd(-3.5, 3.5); arr[o2 + 4] = ny - rnd(1, 3); arr[o2 + 5] = -50;
-      seg++;
-    }
-    x = nx; y = ny;
-    if (y < 10) break;
   }
-  for (; seg < BOLT_SEGS; seg++) {
-    var o3 = seg * 6;
-    arr[o3] = arr[o3 + 1] = arr[o3 + 2] = arr[o3 + 3] = arr[o3 + 4] = arr[o3 + 5] = 0;
+
+  // main channel walks down through the part of the sky the camera can see
+  var x = rnd(-18, 18), y = 30;
+  while (seg < BOLT_SEGS && y > 4) {
+    var nx2 = x + rnd(-1.9, 1.9), ny2 = y - rnd(1.4, 2.8);
+    quad(x, y, nx2, ny2, hw);
+    if (seg < BOLT_SEGS - 2 && Math.random() < 0.25) {      // fork
+      quad(nx2, ny2, nx2 + rnd(-3, 3), ny2 - rnd(1, 2.6), hw * 0.6);
+    }
+    x = nx2; y = ny2;
+  }
+  for (; seg < BOLT_SEGS; seg++) {                          // collapse the rest
+    var o2 = seg * 18;
+    for (var k = 0; k < 18; k++) arr[o2 + k] = 0;
   }
   bolt.geometry.attributes.position.needsUpdate = true;
+  bolt.geometry.computeBoundingSphere();
 }
 
 function updateStars(dt) {
