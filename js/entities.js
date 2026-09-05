@@ -1094,8 +1094,9 @@ function updateDracula(dt) {
   if (boss.charge > 0) {
     boss.charge -= dt;
     var ck = 1 - boss.charge / 0.62;
-    g.userData.aura.material.opacity = (0.25 + ck * 0.75) * boss.alpha;
-    g.userData.aura.scale.setScalar(6 * (1 + ck * 0.5));
+    // bright enough to read as a wind-up, sheer enough to keep his silhouette
+    g.userData.aura.material.opacity = (0.22 + ck * 0.4) * boss.alpha;
+    g.userData.aura.scale.setScalar(6 * (1 + ck * 0.26));
     if (Math.random() < 0.55) {
       spawnParticles(boss.x + dir * 0.8, boss.y + 1.3, 0.9, 0xff5522, 1, 3.2, 0.35, 0.12, 6);
     }

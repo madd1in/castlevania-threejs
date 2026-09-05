@@ -481,7 +481,7 @@ function stainedGlass(x, y, r) {
 function carpet(left, right, y) {
   var w = right - left;
   // sits above the ledge cap so it never z-fights with the platform top
-  var c = box(w, 0.07, 3.4, new THREE.MeshLambertMaterial({ color: 0x6e1420 }), left + w / 2, y + 0.19, -1.2);
+  var c = box(w, 0.07, 3.4, new THREE.MeshLambertMaterial({ color: 0x4a0e16 }), left + w / 2, y + 0.19, -1.2);
   scene.add(c);
   scene.add(box(w, 0.09, 0.3, MAT.gold, left + w / 2, y + 0.2, -2.85));
   scene.add(box(w, 0.09, 0.3, MAT.gold, left + w / 2, y + 0.2, 0.45));
