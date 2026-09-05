@@ -15,14 +15,15 @@ var SPAWNS = [
   /* --- Zone B: great hall --- */
   S('skeleton', 113, 0), S('bat', 117, 6), S('ghost', 121, 2.5), S('zombie', 125, 0),
   S('skeleton', 129, 0), S('bat', 133, 7), S('axearmor', 136, 0), S('zombie', 140, 0),
-  S('medusa', 149, 4.2, -2.6), S('zombie', 151, 0), S('skeleton', 156, 0),
+  S('medusa', 149, 4.2, -2.6), S('zombie', 151, 0), S('bonepillar', 154, 0),
+  S('skeleton', 158, 0),
   S('medusa', 161, 5.4, -2.4), S('ghost', 158, 3), S('axearmor', 163, 0),
   S('zombie', 165, 0),
   /* --- Zone C: the chasm --- */
-  S('bat', 183, 4.5), S('skeleton', 187, 0), S('bat', 191, 6),
+  S('bat', 183, 4.5), S('bonepillar', 189, 0), S('bat', 191, 6),
   S('medusa', 197, 5.5, -2.5), S('medusa', 203, 7, -2.3), S('medusa', 208, 4.5, -2.6),
   S('bat', 205, 9), S('skeleton', 213, 0), S('axearmor', 218, 0),
-  S('fleaman', 222, 0), S('skeleton', 226, 0),
+  S('fleaman', 222, 0), S('bonepillar', 225, 0),
   /* --- Zone D: throne room approach --- */
   S('bat', 231, 5), S('zombie', 234, 0)
 ];
@@ -40,13 +41,20 @@ var G = {
   state: 'boot', t: 0, score: 0, kills: 0, shake: 0, freeze: 0,
   camX: 6, camY: 4, bossStarted: false, midbossStarted: false, midbossDone: false,
   elapsed: 0, toastT: 0, cardT: 0, stopwatch: 0, cine: 0,
-  combo: 0, comboT: 0, zone: -1, best: 0, hurtFx: 0, beatT: 0, candleT: 0,
+  combo: 0, comboT: 0, zone: -1, best: 0, hurtFx: 0, beatT: 0, candleT: 0, nextLife: 25000,
 
-  addScore: function (n) { this.score += n; },
+  addScore: function (n) {
+    this.score += n;
+    while (this.score >= this.nextLife) {          // arcade-style extra man
+      this.nextLife += 25000;
+      P.lives++;
+      A.crystal(); this.toast('1UP'); this.flash();
+    }
+  },
   registerKill: function (base) {
     this.comboT = 2.6;
     this.combo = Math.min(5, this.combo + 1);
-    this.score += base * this.combo;
+    this.addScore(base * this.combo);
     this.kills++;
     if (this.combo > 1) this.toast('x' + this.combo + '  ' + (base * this.combo));
   },
@@ -176,16 +184,16 @@ function setState(s) {
     screen.className = 'screen';
     hud.className = (s === 'pause') ? 'show' : '';
   }
-  if (s === 'title') { A.danger = false; A.setTheme('title', true); }
-  if (s === 'gameover') { A.danger = false; A.setTheme('gameover', true); A.resume(); if (A.on) A.start(); }
-  if (s === 'win') { A.danger = false; A.setTheme('victory', true); A.resume(); if (A.on) A.start(); }
+  if (s === 'title') { A.danger = false; A.setTheme('title', true); A.muteAmbience(); }
+  if (s === 'gameover') { A.danger = false; A.muteAmbience(); A.setTheme('gameover', true); A.resume(); if (A.on) A.start(); }
+  if (s === 'win') { A.danger = false; A.muteAmbience(); A.setTheme('victory', true); A.resume(); if (A.on) A.start(); }
 }
 
 function startRun() {
   G.score = 0; G.kills = 0; G.elapsed = 0;
   G.bossStarted = false; G.midbossStarted = false; G.midbossDone = false;
   G.stopwatch = 0; G.combo = 0; G.comboT = 0; G.zone = -1; G.freeze = 0;
-  G.cine = 0; G.hurtFx = 0; G.candleT = 0;
+  G.cine = 0; G.hurtFx = 0; G.candleT = 0; G.nextLife = 25000;
   clearActors();
   P.maxHp = D().hp;
   P.hp = P.maxHp; P.hearts = D().hearts; P.lives = D().lives;
@@ -199,6 +207,7 @@ function startRun() {
   for (var c = 0; c < candles.length; c++) {
     if (!candles[c].alive) { candles[c].alive = true; scene.add(candles[c].g); }
   }
+  resetBreakWalls();
   G.camX = clamp(P.x, HALF_W, LEVEL_MAX - HALF_W); G.camY = 4;
   buildBars();
   lastHud = {};
@@ -292,9 +301,10 @@ function updateProgress(dt) {
   var zi = 0;
   for (i = 0; i < ZONES.length; i++) { if (P.x < ZONES[i].x) { zi = i; break; } }
   if (zi !== G.zone) {
-    if (G.zone >= 0) G.card(ZONES[zi].num, ZONES[zi].name);
+    if (G.zone >= 0) { G.card(ZONES[zi].num, ZONES[zi].name); A.stageJingle(); }
     G.zone = zi;
     if (!boss) A.setTheme(ZONES[zi].key === 'boss' ? 'chasm' : ZONES[zi].key);
+    A.setAmbience(zi === 0 ? 'wind' : 'hall');
   }
 
   if (!G.midbossDone && !G.midbossStarted && P.x > MIDBOSS_X) {
@@ -337,16 +347,50 @@ function respawnArenaCandles(dt) {
   }
 }
 
+/* ------------------------- adaptive resolution -------------------------
+   Fill rate is the usual bottleneck on this kind of scene, so the render
+   scale is trimmed automatically until frames land inside the budget. */
+var RES = { cur: 1, max: 1, acc: 0, n: 0, fps: 60, cool: 0 };
+function initRes() {
+  RES.max = Math.min(window.devicePixelRatio || 1, 2);
+  RES.cur = RES.max;
+  applyRes();
+}
+function applyRes() {
+  renderer.setPixelRatio(RES.cur);
+  renderer.setSize(Math.max(1, innerWidth), Math.max(1, innerHeight), false);
+}
+function trackFps(raw) {
+  RES.acc += raw; RES.n++;
+  if (RES.cool > 0) RES.cool--;
+  if (RES.n < 24) return;
+  var avg = RES.acc / RES.n;
+  RES.acc = 0; RES.n = 0;
+  RES.fps = Math.round(1 / Math.max(0.001, avg));
+  var el = $('fps');
+  if (el) { el.textContent = RES.fps; el.className = RES.fps < 45 ? 'low' : ''; }
+  if (RES.cool > 0) return;
+  if (avg > 0.0215 && RES.cur > 0.55) {
+    RES.cur = Math.max(0.55, RES.cur - 0.15); applyRes(); RES.cool = 3;
+  } else if (avg < 0.0135 && RES.cur < RES.max) {
+    RES.cur = Math.min(RES.max, RES.cur + 0.1); applyRes(); RES.cool = 6;
+  }
+}
+
 /* ------------------------- main loop ------------------------- */
 var lastT = 0;
 function frame(now) {
   requestAnimationFrame(frame);
-  var dt = Math.min(0.034, (now - lastT) / 1000 || 0.016);
+  var raw = (now - lastT) / 1000;
+  if (!(raw > 0) || raw > 0.5) raw = 0.016;
+  trackFps(raw);
+  var dt = Math.min(0.034, raw);
   lastT = now;
 
   if (tap('music')) {
     A.on = !A.on;
-    if (!A.on) A.stop(); else { A.resume(); if (G.state === 'play' || G.state === 'title') A.start(); }
+    if (!A.on) { A.stop(); A.muteAmbience(); }
+    else { A.resume(); if (G.state === 'play' || G.state === 'title') A.start(); }
     if (G.state === 'pause') $('frame').innerHTML = FRAMES.pause();
   }
   if (tap('start')) {
@@ -427,8 +471,11 @@ function boot() {
   initParticles();
   buildWeather();
   buildLevel();
+  buildRubble();
+  optimizeScene();
   createPlayer();
   buildBars();
+  initRes();
   G.best = loadBest();
   diffIdx = loadDiff();
   setState('title');

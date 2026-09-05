@@ -324,6 +324,9 @@ function whipHitTest(W) {
     if (!c.alive) continue;
     if (hits(hb, c)) breakCandle(c);
   }
+  for (i = 0; i < breakWalls.length; i++) {
+    if (breakWalls[i].alive && hits(hb, breakWalls[i])) smashWall(breakWalls[i]);
+  }
   for (i = 0; i < projectiles.length; i++) {
     var pr = projectiles[i];
     if (pr.dead || pr.friendly || !pr.breakable) continue;
@@ -498,6 +501,10 @@ function makeProj(kind, x, y, vx, vy, friendly) {
     g.add(colorBox(0.14, 0.26, 0.16, 0xe6e0cc, -0.17, 0, 0));
     g.add(colorBox(0.14, 0.26, 0.16, 0xe6e0cc, 0.17, 0, 0));
     col = 0xe6e0cc; grav = -18; dmg = 1; breakable = true;
+  } else if (kind === 'spit') {
+    g.add(colorBox(0.34, 0.34, 0.34, 0xffd070, 0, 0, 0));
+    g.add(sprite(TEX.glow, 1.7, 0xff9a30, 0.85));
+    col = 0xffa040; w = 0.44; h = 0.44; grav = -6; dmg = 2; breakable = true; life = 3;
   } else if (kind === 'eaxe') {
     g.add(colorBox(0.12, 0.6, 0.12, 0x4a3a28, 0, 0, 0));
     g.add(colorBox(0.4, 0.32, 0.14, 0x8a94a4, 0.2, 0.2, 0));
@@ -508,7 +515,7 @@ function makeProj(kind, x, y, vx, vy, friendly) {
     col = 0xff5522; w = 0.5; h = 0.5; dmg = 2; life = 5;
     breakable = true;                      // the whip can swat fireballs away
   }
-  if (kind !== 'fireball' && kind !== 'flame') {
+  if (kind !== 'fireball' && kind !== 'flame' && kind !== 'spit') {
     var gl2 = sprite(TEX.glow, 1.1, col, 0.35); gl2.position.z = -0.15; g.add(gl2);
   }
   g.position.set(x, y, 0.8);
@@ -687,6 +694,19 @@ function buildEnemyMesh(type) {
     g.add(colorBox(0.07, 0.07, 0.04, 0xffe040, 0.08, 0.3, 0.15));
     g.add(colorBox(0.12, 0.3, 0.12, 0x5a3048, -0.16, -0.26, 0));
     g.add(colorBox(0.12, 0.3, 0.12, 0x5a3048, 0.16, -0.26, 0));
+  } else if (type === 'bonepillar') {
+    for (var s3 = 0; s3 < 3; s3++) {
+      g.add(colorBox(0.62, 0.5, 0.55, 0xd8d2bc, 0, -1.05 + s3 * 0.52, 0));
+      g.add(colorBox(0.7, 0.08, 0.6, 0xb8b2a0, 0, -0.8 + s3 * 0.52, 0));
+    }
+    var sk = colorBox(0.74, 0.66, 0.68, 0xefe9d4, 0, 0.85, 0);
+    g.add(sk);
+    g.add(colorBox(0.16, 0.18, 0.05, 0x170f12, -0.18, 0.92, 0.35));
+    g.add(colorBox(0.16, 0.18, 0.05, 0x170f12, 0.18, 0.92, 0.35));
+    var jaw = colorBox(0.5, 0.16, 0.5, 0xefe9d4, 0, 0.55, 0.06);
+    g.add(jaw);
+    g.userData.jaw = jaw;
+    g.userData.skull = sk;
   } else if (type === 'ghost') {
     var bd = colorBox(0.6, 0.9, 0.5, 0xc8d4e8, 0, 0, 0);
     bd.material.transparent = true; bd.material.opacity = 0.55;
@@ -708,7 +728,8 @@ var ESTATS = {
   medusa:   { w: 0.6, h: 0.6, hp: 1, score: 250, dmg: 1, fly: 1 },
   axearmor: { w: 0.95, h: 1.9, hp: 6, score: 900, dmg: 2, fly: 0 },
   fleaman:  { w: 0.55, h: 0.7, hp: 2, score: 400, dmg: 1, fly: 0 },
-  ghost:    { w: 0.7, h: 1.3, hp: 2, score: 350, dmg: 1, fly: 1 }
+  ghost:    { w: 0.7, h: 1.3, hp: 2, score: 350, dmg: 1, fly: 1 },
+  bonepillar: { w: 0.8, h: 2.6, hp: 4, score: 600, dmg: 2, fly: 0 }
 };
 
 function spawnEnemy(type, x, y, def) {
@@ -777,6 +798,21 @@ function updateEnemies(dt) {
           e.x += e.vx * dt;
           e.y = e.y0 + Math.sin(e.t * 3.2) * 1.9;
           e.face = e.vx > 0 ? 1 : -1;
+          break;
+        case 'bonepillar':                       // rooted, spits fire in an arc
+          e.face = dx > 0 ? 1 : -1;
+          if (adx < 13) {
+            e.cd -= dt;
+            if (e.cd <= 0) {
+              e.cd = rnd(1.9, 3.0);
+              e.spitT = 0.34;
+              makeProj('spit', e.x + e.face * 0.55, e.y + 0.85, e.face * 7.2, 1.4, false);
+              A.fire();
+            }
+          }
+          if (e.spitT > 0) e.spitT -= dt;
+          if (e.g.userData.jaw) e.g.userData.jaw.position.y = 0.55 - (e.spitT > 0 ? 0.16 : 0);
+          if (e.g.userData.skull) e.g.userData.skull.position.y = 0.85 + Math.sin(e.t * 2) * 0.04;
           break;
         case 'ghost':
           e.vx += clamp(dx, -1, 1) * 2.2 * dt;

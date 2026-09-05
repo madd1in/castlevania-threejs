@@ -77,6 +77,8 @@ var THEMES = {
   },
   courtyard: {
     tempo: 0.1875, drums: 1, leadGain: 0.115,
+    cnt:  [57, 0,  0,60, 0, 0,64, 0, 53, 0,  0,57, 0, 0,60, 0,
+           55, 0,  0,59, 0, 0,62, 0, 52, 0,  0,56, 0, 0,59, 0],
     bass: [45, 45, 52, 45, 45, 45, 52, 45, 41, 41, 48, 41, 41, 41, 48, 41,
            43, 43, 50, 43, 43, 43, 50, 43, 40, 40, 47, 40, 40, 40, 47, 40],
     arp:  [57, 60, 64, 60, 57, 60, 64, 60, 53, 57, 60, 57, 53, 57, 60, 57,
@@ -86,6 +88,8 @@ var THEMES = {
   },
   hall: {
     tempo: 0.175, drums: 1, leadGain: 0.115,
+    cnt:  [62, 0,  0,65, 0, 0,69, 0, 58, 0,  0,62, 0, 0,65, 0,
+           60, 0,  0,64, 0, 0,67, 0, 57, 0,  0,60, 0, 0,64, 0],
     bass: [38, 38, 45, 38, 38, 38, 45, 38, 34, 34, 41, 34, 34, 34, 41, 34,
            36, 36, 43, 36, 36, 36, 43, 36, 33, 33, 40, 33, 33, 33, 40, 33],
     arp:  [50, 53, 57, 53, 50, 53, 57, 53, 46, 50, 53, 50, 46, 50, 53, 50,
@@ -95,6 +99,8 @@ var THEMES = {
   },
   chasm: {
     tempo: 0.16, drums: 1, leadGain: 0.105,
+    cnt:  [64, 0,  0,67, 0, 0,71, 0, 64, 0,  0,67, 0, 0,71, 0,
+           62, 0,  0,65, 0, 0,69, 0, 61, 0,  0,64, 0, 0,68, 0],
     bass: [40, 40, 40, 46, 40, 40, 45, 44, 40, 40, 40, 46, 40, 40, 45, 44,
            38, 38, 38, 44, 38, 38, 43, 42, 37, 37, 37, 43, 37, 36, 35, 34],
     arp:  [52, 55, 59, 55, 52, 55, 59, 55, 52, 55, 59, 55, 52, 55, 59, 55,
@@ -104,6 +110,8 @@ var THEMES = {
   },
   boss: {
     tempo: 0.142, drums: 2, leadGain: 0.125,
+    cnt:  [64, 0,64, 0,64,63,64,67, 62, 0,62, 0,62,61,62,65,
+           64, 0,64, 0,64,63,64,67, 68,67,66,65,64,63,62,61],
     bass: [40, 40, 40, 47, 40, 40, 46, 45, 38, 38, 38, 45, 38, 38, 44, 43,
            40, 40, 40, 47, 40, 40, 46, 45, 44, 44, 44, 51, 44, 43, 42, 41],
     arp:  [52, 56, 59, 56, 52, 56, 59, 56, 50, 53, 57, 53, 50, 53, 57, 53,
@@ -113,6 +121,8 @@ var THEMES = {
   },
   midboss: {
     tempo: 0.155, drums: 2, leadGain: 0.12, organ: 1,
+    cnt:  [69, 0,67, 0,69,67,69,72, 67, 0,65, 0,67,65,67,69,
+           69, 0,67, 0,69,67,69,72, 74,72,71,69,67,65,64,62],
     bass: [45, 45, 45, 52, 45, 44, 43, 42, 41, 41, 41, 48, 41, 40, 39, 38,
            45, 45, 45, 52, 45, 44, 43, 42, 47, 47, 47, 54, 47, 46, 45, 44],
     arp:  [57, 60, 64, 60, 57, 60, 64, 60, 53, 57, 60, 57, 53, 57, 60, 57,
@@ -171,13 +181,21 @@ var A = {
   resume: function () { this.init(); if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); },
   f: function (m) { return 440 * Math.pow(2, (m - 69) / 12); },
 
-  tone: function (freq, dur, type, gain, when, slide, dest, detune) {
+  tone: function (freq, dur, type, gain, when, slide, dest, detune, vib) {
     if (!this.ctx || !this.on) return;
     var t = when || this.ctx.currentTime;
     var o = this.ctx.createOscillator(), g = this.ctx.createGain();
     o.type = type || 'square';
     o.frequency.setValueAtTime(freq, t);
     if (detune) o.detune.setValueAtTime(detune, t);
+    if (vib && dur > 0.12) {                 // a little wobble sells the lead
+      var lfo = this.ctx.createOscillator(), lg = this.ctx.createGain();
+      lfo.frequency.setValueAtTime(5.5, t);
+      lg.gain.setValueAtTime(0, t);
+      lg.gain.linearRampToValueAtTime(11, t + dur * 0.55);
+      lfo.connect(lg); lg.connect(o.detune);
+      lfo.start(t); lfo.stop(t + dur + 0.02);
+    }
     if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(20, slide), t + dur);
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(gain || 0.2, t + 0.008);
@@ -267,6 +285,47 @@ var A = {
     });
   },
 
+  stageJingle: function () {
+    var c = this.ctx ? this.ctx.currentTime : 0, self = this;
+    [[0, 62], [0.1, 66], [0.2, 69], [0.32, 74]].forEach(function (n) {
+      self.tone(self.f(n[1]), 0.26, 'square', 0.11, c + n[0], 0, self.fx);
+      self.tone(self.f(n[1] - 12), 0.26, 'triangle', 0.09, c + n[0]);
+    });
+  },
+
+  /* ---- ambience bed: wind outdoors, a low hall rumble inside ---- */
+  amb: null,
+  startAmbience: function () {
+    if (!this.ctx || this.amb) return;
+    var src = this.ctx.createBufferSource();
+    src.buffer = this.noise; src.loop = true;
+    var f = this.ctx.createBiquadFilter(); f.type = 'bandpass';
+    f.frequency.value = 420; f.Q.value = 0.55;
+    var g = this.ctx.createGain(); g.gain.value = 0;
+    // slow gusts
+    var lfo = this.ctx.createOscillator(), lg = this.ctx.createGain();
+    lfo.frequency.value = 0.11; lg.gain.value = 0.018;
+    lfo.connect(lg); lg.connect(g.gain); lfo.start();
+    src.connect(f); f.connect(g); g.connect(this.master);
+    src.start();
+    this.amb = { src: src, filt: f, gain: g, kind: '' };
+  },
+  setAmbience: function (kind) {
+    this.startAmbience();
+    if (!this.amb || this.amb.kind === kind) return;
+    this.amb.kind = kind;
+    var t = this.ctx.currentTime;
+    var freq = kind === 'wind' ? 560 : (kind === 'hall' ? 165 : 300);
+    var vol = this.on ? (kind === 'wind' ? 0.05 : (kind === 'hall' ? 0.032 : 0)) : 0;
+    this.amb.filt.frequency.linearRampToValueAtTime(freq, t + 1.4);
+    this.amb.gain.gain.linearRampToValueAtTime(vol, t + 1.4);
+  },
+  muteAmbience: function () {
+    if (!this.amb) return;
+    this.amb.gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.3);
+    this.amb.kind = '';
+  },
+
   /* ---- sequencer ---- */
   setTheme: function (name, immediate) {
     if (!THEMES[name] || this.themeName === name) return;
@@ -307,10 +366,12 @@ var A = {
     if (a && (s % 2 === 0 || T.drums === 2)) this.tone(this.f(a + 12), tp * 0.42, 'square', 0.05, t, 0, this.mg);
     if (m) {
       var g = T.leadGain;
-      this.tone(this.f(m), tp * 0.95, 'square', g, t, 0, this.mg);
+      this.tone(this.f(m), tp * 0.95, 'square', g, t, 0, this.mg, 0, true);
       this.tone(this.f(m), tp * 0.95, 'square', g * 0.55, t, 0, this.mg, 9);
       this.tone(this.f(m), tp * 0.6, 'square', g * 0.5, t, 0, this.fx);
     }
+    var c = T.cnt && T.cnt[s];
+    if (c) this.tone(this.f(c), tp * 1.9, 'triangle', 0.075, t, 0, this.mg);
     if (T.pad && s % 8 === 0 && b) {
       this.tone(this.f(b + 12), tp * 7.5, 'sine', 0.05, t, 0, this.mg);
       this.tone(this.f(b + 19), tp * 7.5, 'sine', 0.035, t, 0, this.mg);

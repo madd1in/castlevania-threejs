@@ -7,6 +7,8 @@ var renderer, scene, camera, skyGroup, farLayer, midLayer, fgLayer;
 var platforms = [], torches = [], candles = [], decoLights = [], flames = [];
 var movers = [], rings = [], rain = null, dust = null, lightning = 0, lightningCd = 6;
 var ambLight = null, moonLight = null;
+var bolt = null, BOLT_SEGS = 26, shootingStar = null, starT = 5, starLife = 0;
+var swayers = [], breakWalls = [], rubble = null;
 var HALF_W = 10;
 
 /* ------------------------- procedural textures ------------------------- */
@@ -108,6 +110,13 @@ function initAssets() {
   MAT.black = new THREE.MeshBasicMaterial({ color: 0x02020a });
   MAT.silhouette = new THREE.MeshBasicMaterial({ color: 0x070912, fog: false });
   MAT.silhouette2 = new THREE.MeshBasicMaterial({ color: 0x0d1020, fog: false });
+  MAT.litWindow = new THREE.MeshBasicMaterial({ color: 0xffb35c, fog: false });
+  MAT.wallDark = new THREE.MeshLambertMaterial({ map: TEX.brickDark, color: 0x5a5f78 });
+  MAT.wallWarm = new THREE.MeshLambertMaterial({ map: TEX.brickWarm, color: 0x5a5f78 });
+  MAT.carpet = new THREE.MeshLambertMaterial({ color: 0x4a0e16 });
+  MAT.banner = new THREE.MeshLambertMaterial({ color: 0x7a1420 });
+  MAT.spike = new THREE.MeshLambertMaterial({ color: 0x8b8f9c });
+  MAT.wax = new THREE.MeshLambertMaterial({ color: 0xe8e0c8 });
   MAT.moonGlass = new THREE.MeshBasicMaterial({ color: 0x9fc4ff, transparent: true, opacity: 0.55 });
 }
 
@@ -117,6 +126,105 @@ function box(w, h, d, mat, x, y, z) {
   var m = new THREE.Mesh(BOX, mat);
   m.scale.set(w, h, d); m.position.set(x, y, z || 0);
   return m;
+}
+
+/* =========================================================================
+   STATIC BATCHING
+   Hundreds of little boxes cost far more in scene-graph walking and draw
+   calls than they do in triangles, so everything that never moves gets
+   baked into one mesh per material once the level is built.
+   ========================================================================= */
+var staticMeshes = [], merged = false;
+function keepStatic(m) { if (!merged) staticMeshes.push(m); return m; }
+
+function concatGeos(geos) {
+  var names = ['position', 'normal', 'uv'], total = 0, i;
+  for (i = 0; i < geos.length; i++) total += geos[i].attributes.position.count;
+  var out = new THREE.BufferGeometry();
+  names.forEach(function (name) {
+    if (!geos[0].attributes[name]) return;
+    var itemSize = geos[0].attributes[name].itemSize;
+    var arr = new Float32Array(total * itemSize), off = 0;
+    for (var k = 0; k < geos.length; k++) {
+      var a = geos[k].attributes[name].array;
+      arr.set(a, off); off += a.length;
+    }
+    out.setAttribute(name, new THREE.BufferAttribute(arr, itemSize));
+  });
+  out.computeBoundingSphere();
+  return out;
+}
+
+function mergeMeshes(parent, meshes) {
+  var byMat = {}, k;
+  for (var i = 0; i < meshes.length; i++) {
+    var m = meshes[i];
+    if (!m.parent || m.parent !== parent) continue;
+    k = m.material.uuid;
+    if (!byMat[k]) byMat[k] = { mat: m.material, list: [] };
+    byMat[k].list.push(m);
+  }
+  var count = 0;
+  for (k in byMat) {
+    var entry = byMat[k];
+    if (entry.list.length < 2) continue;
+    var geos = [];
+    for (var j = 0; j < entry.list.length; j++) {
+      var mm = entry.list[j];
+      mm.updateMatrix();
+      var g = mm.geometry.index ? mm.geometry.toNonIndexed() : mm.geometry.clone();
+      g.applyMatrix4(mm.matrix);
+      geos.push(g);
+      parent.remove(mm);
+    }
+    var mesh = new THREE.Mesh(concatGeos(geos), entry.mat);
+    mesh.matrixAutoUpdate = false; mesh.updateMatrix();
+    parent.add(mesh);
+    count++;
+  }
+  return count;
+}
+
+/* flatten a whole parallax layer (nested groups included) into one mesh per material */
+function mergeLayer(layer) {
+  layer.updateMatrixWorld(true);
+  var inv = new THREE.Matrix4().copy(layer.matrixWorld).invert();
+  var byMat = {}, keep = [];
+  layer.traverse(function (o) {
+    if (o === layer) return;
+    if (o.isMesh) {
+      var k = o.material.uuid;
+      if (!byMat[k]) byMat[k] = { mat: o.material, geos: [] };
+      var g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+      g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld));
+      byMat[k].geos.push(g);
+    } else if (o.isSprite || o.isPoints) keep.push(o);
+  });
+  while (layer.children.length) layer.remove(layer.children[0]);
+  for (var i = 0; i < keep.length; i++) layer.add(keep[i]);
+  for (var k2 in byMat) {
+    var mesh = new THREE.Mesh(concatGeos(byMat[k2].geos), byMat[k2].mat);
+    mesh.matrixAutoUpdate = false; mesh.updateMatrix();
+    layer.add(mesh);
+  }
+}
+
+/* drop per-frame matrix maths for anything that will never move again */
+function freezeBoxes(group) {
+  group.matrixAutoUpdate = false; group.updateMatrix();
+  for (var i = 0; i < group.children.length; i++) {
+    var c = group.children[i];
+    if (c.isMesh) { c.matrixAutoUpdate = false; c.updateMatrix(); }
+  }
+}
+
+function bakeUV(w, h, scale) {
+  var g = BOX.clone();
+  var uv = g.attributes.uv;
+  var rx = Math.max(1, Math.round(w / scale)), ry = Math.max(1, Math.round(h / scale));
+  for (var i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * rx, uv.getY(i) * ry);
+  uv.needsUpdate = true;
+  return g;
 }
 function colorBox(w, h, d, color, x, y, z) {
   return box(w, h, d, new THREE.MeshLambertMaterial({ color: color }), x, y, z);
@@ -145,21 +253,23 @@ function initRenderer() {
   camera = new THREE.PerspectiveCamera(50, 16 / 9, 0.1, 400);
   camera.position.set(6, 4, VIEW_Z);
 
-  ambLight = new THREE.AmbientLight(0x232c4a, 0.55); scene.add(ambLight);
+  ambLight = new THREE.AmbientLight(0x2a3352, 0.6); scene.add(ambLight);
   moonLight = new THREE.DirectionalLight(0x7f97e0, 0.52);
   moonLight.position.set(-8, 14, 12); scene.add(moonLight);
   var rim = new THREE.DirectionalLight(0x1b1630, 0.4);
   rim.position.set(9, -3, 6); scene.add(rim);
 
-  for (var i = 0; i < 6; i++) {
-    var pl = new THREE.PointLight(0xff9130, 0, 17, 2);
+  for (var i = 0; i < 5; i++) {
+    var pl = new THREE.PointLight(0xff9130, 0, 19, 2);
     scene.add(pl); decoLights.push(pl);
   }
   onResize();
   addEventListener('resize', onResize);
 }
 function onResize() {
-  var w = innerWidth, h = innerHeight;
+  // a hidden or collapsed window reports 0x0; letting that through makes the
+  // camera aspect NaN, which silently disables frustum culling
+  var w = Math.max(1, innerWidth), h = Math.max(1, innerHeight);
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
@@ -197,9 +307,9 @@ function buildSky() {
   var moon = new THREE.Mesh(new THREE.CircleGeometry(5.0, 48),
     new THREE.MeshBasicMaterial({ color: 0xf0c9a4, fog: false }));
   moon.position.set(-19, 30, -60); skyGroup.add(moon);
-  var mg = sprite(TEX.glow, 26, 0xff9a70, 0.4); mg.position.copy(moon.position); mg.position.z += 0.5;
+  var mg = sprite(TEX.glow, 17, 0xff9a70, 0.45); mg.position.copy(moon.position); mg.position.z += 0.5;
   skyGroup.add(mg);
-  var mg2 = sprite(TEX.glowRed, 62, 0xff3322, 0.2); mg2.position.copy(moon.position);
+  var mg2 = sprite(TEX.glowRed, 30, 0xff3322, 0.26); mg2.position.copy(moon.position);
   skyGroup.add(mg2);
   // craters
   [[-1.6, 1.3, 1.0], [1.4, -0.8, 0.7], [0.3, 2.1, 0.5], [-2.2, -1.9, 0.55]].forEach(function (c) {
@@ -210,13 +320,34 @@ function buildSky() {
   });
 
   // clouds
-  for (var k = 0; k < 16; k++) {
+  for (var k = 0; k < 8; k++) {
     var cl = sprite(TEX.glow, rnd(14, 30), 0x2a2438, rnd(0.10, 0.24));
     cl.material.blending = THREE.NormalBlending;
     cl.position.set(rnd(-80, 80), rnd(16, 44), -55);
     cl.userData.drift = rnd(0.15, 0.5);
     skyGroup.add(cl);
   }
+
+  // forked lightning, redrawn on every strike (one draw call, only while lit)
+  var bg = new THREE.BufferGeometry();
+  bg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(BOLT_SEGS * 6), 3));
+  bolt = new THREE.LineSegments(bg, new THREE.LineBasicMaterial({
+    color: 0xdfeaff, transparent: true, opacity: 0, fog: false,
+    blending: THREE.AdditiveBlending, depthWrite: false
+  }));
+  bolt.frustumCulled = false;
+  bolt.visible = false;
+  skyGroup.add(bolt);
+
+  // occasional shooting star
+  var sg = new THREE.BufferGeometry();
+  sg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+  shootingStar = new THREE.LineSegments(sg, new THREE.LineBasicMaterial({
+    color: 0xffffff, transparent: true, opacity: 0, fog: false,
+    blending: THREE.AdditiveBlending, depthWrite: false
+  }));
+  shootingStar.frustumCulled = false;
+  skyGroup.add(shootingStar);
 
   farLayer = new THREE.Group(); scene.add(farLayer);
   midLayer = new THREE.Group(); scene.add(midLayer);
@@ -246,10 +377,7 @@ function buildFarCastle() {
     // lit windows
     for (var i = 0; i < 3; i++) {
       if (Math.random() < 0.55) {
-        var wnd = box(0.55, 0.9, 0.2,
-          new THREE.MeshBasicMaterial({ color: 0xffb35c, fog: false }),
-          rnd(-w / 3, w / 3), rnd(h * 0.3, h * 0.85), 0.6);
-        g.add(wnd);
+        g.add(box(0.55, 0.9, 0.2, MAT.litWindow, rnd(-w / 3, w / 3), rnd(h * 0.3, h * 0.85), 0.6));
       }
     }
     g.position.set(x, 0, z);
@@ -260,7 +388,7 @@ function buildFarCastle() {
   tower(62, 6, 24, true); tower(70, 9, 15, false); tower(78, 4.5, 20, true);
 
   // bats in the distance
-  for (var b = 0; b < 26; b++) {
+  for (var b = 0; b < 10; b++) {
     var s = sprite(TEX.glow, 1.6, 0x0b0c16, 0.9);
     s.material.blending = THREE.NormalBlending;
     s.position.set(rnd(-20, 90), rnd(14, 34), z + 6);
@@ -320,25 +448,23 @@ function addPlat(left, bottom, w, h, opt) {
 
   var mat = opt.mat || MAT.stone;
   var depth = opt.depth || 3.2;
-  var m = box(w, h, depth, mat, p.x, p.y, opt.z === undefined ? -0.6 : opt.z);
-  if (mat.map) {
-    m.material = mat.clone();
-    m.material.map = mat.map.clone();
-    m.material.map.needsUpdate = true;
-    m.material.map.repeat.set(Math.max(1, Math.round(w / 2.2)), Math.max(1, Math.round(h / 2.2)));
-  }
+  // tiling is baked into the UVs so every platform can share one material
+  var m = new THREE.Mesh(mat.map ? bakeUV(w, h, 2.2) : BOX, mat);
+  m.scale.set(w, h, depth);
+  m.position.set(p.x, p.y, opt.z === undefined ? -0.6 : opt.z);
   scene.add(m);
 
   // top ledge highlight
   var cap = box(w + 0.12, 0.22, depth + 0.14, MAT.cap, p.x, bottom + h + 0.02, m.position.z);
   scene.add(cap);
   p.mesh = m; p.cap = cap;
+  if (!opt.dynamic) { keepStatic(m); keepStatic(cap); }
   return p;
 }
 
 /* platforms that drift back and forth */
 function addMovingPlat(left, bottom, w, h, ax, ay, sp, ph) {
-  var p = addPlat(left, bottom, w, h, { oneway: true, mat: MAT.wood, depth: 2 });
+  var p = addPlat(left, bottom, w, h, { oneway: true, mat: MAT.wood, depth: 2, dynamic: true });
   movers.push({ p: p, x0: p.x, y0: p.y, ax: ax, ay: ay, sp: sp, ph: ph || 0 });
   // chain hanging from above
   var chain = box(0.1, 26, 0.1, MAT.iron, p.x, p.y + 13.2, -0.6);
@@ -389,13 +515,13 @@ function stairs(x0, baseBottom, n, sw, sh, dir, mat) {
 
 function backWall(left, right, bottom, top, mat) {
   var w = right - left, h = top - bottom;
-  var m = box(w, h, 1, mat || MAT.stoneDark, left + w / 2, bottom + h / 2, -9);
-  m.material = (mat || MAT.stoneDark).clone();
-  m.material.map = (mat || MAT.stoneDark).map.clone();
-  m.material.map.needsUpdate = true;
-  m.material.map.repeat.set(Math.round(w / 3), Math.round(h / 3));
-  m.material.color.setHex(0x5a5f78);
+  var base = mat || MAT.stoneDark;
+  var wallMat = base === MAT.stoneDark ? MAT.wallDark : MAT.wallWarm;
+  var m = new THREE.Mesh(bakeUV(w, h, 3), wallMat);
+  m.scale.set(w, h, 1);
+  m.position.set(left + w / 2, bottom + h / 2, -9);
   scene.add(m);
+  keepStatic(m);
 }
 
 function window_(x, y, w, h) {
@@ -409,7 +535,7 @@ function window_(x, y, w, h) {
   arch.position.set(0, h / 2, -7.9); g.add(arch);
   for (var i = 1; i < 3; i++) g.add(box(0.12, h + w / 2, 0.2, MAT.iron, -w / 2 + i * w / 3, w / 8, -7.7));
   g.add(box(w + 0.1, 0.14, 0.3, MAT.iron, 0, 0, -7.7));
-  var gl = sprite(TEX.glowBlue, w * 3.4, 0x88aaff, 0.28); gl.position.set(0, 0, -7);
+  var gl = sprite(TEX.glowBlue, w * 2.1, 0x88aaff, 0.34); gl.position.set(0, 0, -7);
   g.add(gl);
 
   // shaft of moonlight spilling into the room
@@ -462,8 +588,8 @@ function stainedGlass(x, y, r) {
     var spoke = box(0.12, r * 2, 0.16, MAT.iron, 0, 0, -7.6);
     spoke.rotation.z = (s2 / 8) * Math.PI; g2.add(spoke);
   }
-  var gl = sprite(TEX.glowRed, r * 5, 0xff6a5a, 0.22); gl.position.z = -7; g2.add(gl);
-  var gl2 = sprite(TEX.glowBlue, r * 4, 0x88aaff, 0.18); gl2.position.z = -7; g2.add(gl2);
+  var gl = sprite(TEX.glowRed, r * 2.9, 0xff6a5a, 0.26); gl.position.z = -7; g2.add(gl);
+  var gl2 = sprite(TEX.glowBlue, r * 2.3, 0x88aaff, 0.22); gl2.position.z = -7; g2.add(gl2);
 
   var beam = new THREE.Mesh(new THREE.PlaneGeometry(r * 2.4, 18),
     new THREE.MeshBasicMaterial({
@@ -489,11 +615,14 @@ function carpet(left, right, y) {
 
 /* polished flagstones that catch the torchlight */
 function glossyFloor(left, right, y) {
+  // a flat Phong plane cost ~2ms a frame for a sliver of sheen; an unlit
+  // gradient strip reads the same at a fraction of the price
   var w = right - left;
   var m = new THREE.Mesh(new THREE.PlaneGeometry(w, 3.4),
-    new THREE.MeshPhongMaterial({ color: 0x2a2c38, shininess: 90, specular: 0x8899bb }));
+    new THREE.MeshBasicMaterial({ color: 0x3a3f52, transparent: true, opacity: 0.55, fog: false }));
   m.rotation.x = -Math.PI / 2;
   m.position.set(left + w / 2, y + 0.15, -1.2);
+  m.matrixAutoUpdate = false; m.updateMatrix();
   scene.add(m);
 }
 
@@ -524,23 +653,23 @@ function cobweb(x, y, flip) {
 }
 
 function torch(x, y) {
-  var g = new THREE.Group();
-  g.add(box(0.22, 0.7, 0.22, MAT.iron, 0, -0.3, 0));
-  g.add(box(0.5, 0.16, 0.5, MAT.iron, 0, 0.05, 0));
+  // brackets go straight into the static batch; only the flame stays an object
+  keepStatic(box(0.22, 0.7, 0.22, MAT.iron, x, y - 0.3, 1.4));
+  keepStatic(box(0.5, 0.16, 0.5, MAT.iron, x, y + 0.05, 1.4));
+  scene.add(staticMeshes[staticMeshes.length - 2]);
+  scene.add(staticMeshes[staticMeshes.length - 1]);
   var fl = sprite(TEX.glow, 1.7, 0xffb44a, 0.95);
-  fl.position.set(0, 0.5, 0.3); g.add(fl);
+  fl.position.set(x, y + 0.5, 1.7); scene.add(fl);
   var core = sprite(TEX.glow, 0.7, 0xfff0c0, 1);
-  core.position.set(0, 0.42, 0.35); g.add(core);
-  g.position.set(x, y, 1.4);
-  scene.add(g);
-  var t = { x: x, y: y, g: g, fl: fl, core: core, ph: rnd(0, 9) };
+  core.position.set(x, y + 0.42, 1.75); scene.add(core);
+  var t = { x: x, y: y, fl: fl, core: core, ph: rnd(0, 9), base: 1.7 };
   torches.push(t); flames.push(t);
   return t;
 }
 
 function candle(x, y) {
   var g = new THREE.Group();
-  g.add(box(0.28, 0.62, 0.28, new THREE.MeshLambertMaterial({ color: 0xe8e0c8 }), 0, 0, 0));
+  g.add(box(0.28, 0.62, 0.28, MAT.wax, 0, 0, 0));
   var fl = sprite(TEX.glow, 1.15, 0xffc45a, 0.95);
   fl.position.set(0, 0.55, 0.25); g.add(fl);
   g.position.set(x, y, 1.2);
@@ -565,18 +694,19 @@ function chandelier(x, y) {
   g.position.set(x, y, 0.4);
   scene.add(g);
   torches.push({ x: x, y: y + 2.6, g: g });
+  swayers.push({ g: g, amp: rnd(0.02, 0.045), sp: rnd(0.7, 1.2), ph: rnd(0, 6.28) });
 }
 
 function banner(x, y) {
   var g = new THREE.Group();
-  var m = new THREE.MeshLambertMaterial({ color: 0x7a1420 });
-  g.add(box(1.8, 4.4, 0.16, m, 0, 0, 0));
+  g.add(box(1.8, 4.4, 0.16, MAT.banner, 0, 0, 0));
   g.add(box(2.2, 0.22, 0.3, MAT.gold, 0, 2.2, 0));
   var crest = new THREE.Mesh(new THREE.CircleGeometry(0.5, 6),
     new THREE.MeshLambertMaterial({ color: 0xc8a24a }));
   crest.position.set(0, 0.7, 0.12); g.add(crest);
   g.position.set(x, y, -6.5);
   scene.add(g);
+  swayers.push({ g: g, amp: rnd(0.015, 0.03), sp: rnd(0.5, 0.9), ph: rnd(0, 6.28) });
 }
 
 function pillar(x, bottom, h) {
@@ -595,11 +725,11 @@ function pillar(x, bottom, h) {
 
 function spikes(left, right, y) {
   var geo = new THREE.ConeGeometry(0.22, 0.9, 4);
-  var mat = new THREE.MeshLambertMaterial({ color: 0x8b8f9c });
   for (var x = left; x < right; x += 0.55) {
-    var m = new THREE.Mesh(geo, mat);
+    var m = new THREE.Mesh(geo, MAT.spike);
     m.position.set(x, y + 0.45, -0.4);
     scene.add(m);
+    keepStatic(m);
   }
 }
 
@@ -621,6 +751,7 @@ function buildLevel() {
   addPlat(28.6, 0, 2.4, 2.0, { mat: MAT.wood });
   addPlat(52, 0, 3, 1.6);
   addPlat(57, 0, 3, 3.2);
+  addBreakWall(48.5, 0, 1.6, 2.2, 'meat');     // cracked block hiding a meal
   stairs(62.2, -5, 5, 1.85, 0.82, 1);         // up to y ~ 4.1
   addPlat(71.6, -5, 26, 9.1);                 // rampart top 4.1, .. 97.6
   addPlat(80, 4.1, 2.4, 2.4, { mat: MAT.wood });
@@ -672,6 +803,7 @@ function buildLevel() {
   addMovingPlat(204.2, 2.4, 3.2, 0.5, 0, 1.5, 1.05, 1.6);
   addPlat(207.8, 4.6, 3.4, 0.5, { oneway: true, mat: MAT.wood, depth: 2 });
   addPlat(210, -5, 18.2, 5);                  // 210 .. 228.2
+  addBreakWall(186.6, 0, 1.6, 2.2, 'money');   // cracked block hiding a purse
   pillar(184, 0, 8); pillar(215, 0, 8); pillar(224, 0, 8);
   addPlat(218, 0, 3, 2.2);
   for (var t2 = 182; t2 < 228; t2 += 8) torch(t2, 4.2);
@@ -738,6 +870,130 @@ function sealMidArena() {
 function openMidArena() {
   gateMidA = killGate(gateMidA);
   gateMidB = killGate(gateMidB);
+}
+
+/* ------------------------- lightning + shooting stars ------------------------- */
+function strikeBolt() {
+  var arr = bolt.geometry.attributes.position.array;
+  var x = rnd(-26, 26), y = 52, i, seg = 0;
+  for (i = 0; i < BOLT_SEGS && seg < BOLT_SEGS; i++) {
+    var nx = x + rnd(-2.6, 2.6), ny = y - rnd(1.6, 3.4);
+    var o = seg * 6;
+    arr[o] = x; arr[o + 1] = y; arr[o + 2] = -50;
+    arr[o + 3] = nx; arr[o + 4] = ny; arr[o + 5] = -50;
+    seg++;
+    // occasional fork
+    if (seg < BOLT_SEGS && Math.random() < 0.22) {
+      var o2 = seg * 6;
+      arr[o2] = nx; arr[o2 + 1] = ny; arr[o2 + 2] = -50;
+      arr[o2 + 3] = nx + rnd(-3.5, 3.5); arr[o2 + 4] = ny - rnd(1, 3); arr[o2 + 5] = -50;
+      seg++;
+    }
+    x = nx; y = ny;
+    if (y < 10) break;
+  }
+  for (; seg < BOLT_SEGS; seg++) {
+    var o3 = seg * 6;
+    arr[o3] = arr[o3 + 1] = arr[o3 + 2] = arr[o3 + 3] = arr[o3 + 4] = arr[o3 + 5] = 0;
+  }
+  bolt.geometry.attributes.position.needsUpdate = true;
+}
+
+function updateStars(dt) {
+  starT -= dt;
+  if (starT <= 0 && starLife <= 0) { starT = rnd(6, 16); starLife = 0.75; }
+  if (starLife > 0) {
+    starLife -= dt;
+    var k = 1 - starLife / 0.75;
+    var sx = -60 + k * 110, sy = 52 - k * 26;
+    var a = shootingStar.geometry.attributes.position.array;
+    a[0] = sx; a[1] = sy; a[2] = -48;
+    a[3] = sx - 5; a[4] = sy + 1.3; a[5] = -48;
+    shootingStar.geometry.attributes.position.needsUpdate = true;
+    shootingStar.material.opacity = Math.sin(k * Math.PI) * 0.85;
+    shootingStar.visible = true;
+  } else shootingStar.visible = false;
+}
+
+/* ------------------------- ground detail ------------------------- */
+function buildRubble() {
+  var n = 150;
+  var mat = new THREE.MeshLambertMaterial({ color: 0x5f5a4e });
+  rubble = new THREE.InstancedMesh(BOX, mat, n);
+  var m = new THREE.Matrix4(), q = new THREE.Quaternion(),
+      v = new THREE.Vector3(), sc = new THREE.Vector3(), z = new THREE.Vector3(0, 0, 1);
+  var spots = [[-4, 40, 0], [47, 71, 0], [72, 96, 4.1], [111, 142, 0],
+               [148, 179, 0], [180, 192, 0], [211, 228, 0], [229, 266, 0]];
+  for (var i = 0; i < n; i++) {
+    var sp = spots[i % spots.length];
+    var s = rnd(0.1, 0.3);
+    v.set(rnd(sp[0], sp[1]), sp[2] + s * 0.4, rnd(-1.6, 0.9));
+    q.setFromAxisAngle(z, rnd(0, 3.14));
+    sc.set(s * rnd(1, 2.4), s, s * rnd(1, 1.8));
+    m.compose(v, q, sc);
+    rubble.setMatrixAt(i, m);
+  }
+  rubble.instanceMatrix.needsUpdate = true;
+  rubble.matrixAutoUpdate = false;
+  scene.add(rubble);
+}
+
+/* ------------------------- destructible walls ------------------------- */
+function addBreakWall(left, bottom, w, h, reward) {
+  var p = { x: left + w / 2, y: bottom + h / 2, w: w, h: h, oneway: false, top: bottom + h };
+  platforms.push(p);
+  var m = new THREE.Mesh(bakeUV(w, h, 2.2), MAT.stone);
+  m.scale.set(w, h, 3.2);
+  m.position.set(p.x, p.y, -0.6);
+  scene.add(m);
+  // hairline cracks so it reads as breakable to an attentive eye
+  var crack = box(w * 0.06, h * 0.8, 3.3, MAT.black, p.x + w * 0.1, p.y, -0.6);
+  crack.material = new THREE.MeshBasicMaterial({ color: 0x11100f });
+  scene.add(crack);
+  breakWalls.push({ p: p, mesh: m, crack: crack, x: p.x, y: p.y, w: w, h: h, reward: reward, alive: true });
+}
+
+function smashWall(bw) {
+  bw.alive = false;
+  var idx = platforms.indexOf(bw.p);
+  if (idx >= 0) platforms.splice(idx, 1);
+  scene.remove(bw.mesh); scene.remove(bw.crack);
+  A.boom(); G.shake = 0.4;
+  for (var i = 0; i < 22; i++) {
+    spawnParticles(bw.x + rnd(-bw.w / 2, bw.w / 2), bw.y + rnd(-bw.h / 2, bw.h / 2),
+      0.8, 0x8f8a7e, 1, 5, 0.7, 0.22);
+  }
+  G.toast('SECRET!');
+  G.addScore(1000);
+  if (bw.reward) dropItem(bw.x, bw.y + 0.5, bw.reward);
+}
+
+function resetBreakWalls() {
+  for (var i = 0; i < breakWalls.length; i++) {
+    var bw = breakWalls[i];
+    if (bw.alive) continue;
+    bw.alive = true;
+    platforms.push(bw.p);
+    scene.add(bw.mesh); scene.add(bw.crack);
+  }
+}
+
+/* collapse the finished level into as few objects as the renderer can manage */
+function optimizeScene() {
+  mergeLayer(farLayer);
+  mergeLayer(midLayer);
+  mergeLayer(fgLayer);
+  mergeMeshes(scene, staticMeshes);
+  merged = true;
+  staticMeshes.length = 0;
+  for (var i = 0; i < scene.children.length; i++) {
+    var c = scene.children[i];
+    if (c.type === 'Group' && c !== skyGroup && c !== farLayer && c !== midLayer && c !== fgLayer) {
+      freezeBoxes(c);
+    }
+  }
+  // things that gently swing need their matrices back
+  for (var s = 0; s < swayers.length; s++) swayers[s].g.matrixAutoUpdate = true;
 }
 
 /* =========================================================================
@@ -836,7 +1092,7 @@ function updateWeather(dt, camX, camY) {
   if (wet > 0.4) {
     lightningCd -= dt;
     if (lightningCd <= 0 && lightning <= 0) {
-      lightningCd = rnd(8, 17); lightning = 0.5; A.thunder();
+      lightningCd = rnd(8, 17); lightning = 0.5; A.thunder(); strikeBolt();
     }
   }
   if (lightning > 0) {
@@ -845,7 +1101,10 @@ function updateWeather(dt, camX, camY) {
     k2 = (L > 0.44) ? 1 : (L > 0.37 ? 0.05 : (L > 0.28 ? 0.75 : (L > 0.22 ? 0 : Math.max(0, L / 0.22) * 0.3)));
     k2 *= wet;
   }
-  ambLight.intensity = 0.55 + k2 * 1.5;
+  bolt.visible = k2 > 0.02;
+  if (bolt.visible) bolt.material.opacity = Math.min(1, k2 * 1.1);
+  updateStars(dt);
+  ambLight.intensity = 0.6 + k2 * 1.5;
   moonLight.intensity = 0.52 + k2 * 1.2;
   for (var b = 0; b < beams.length; b++) {
     beams[b].material.opacity = 0.22 + Math.sin(wt * 1.3 + b) * 0.06;
@@ -855,49 +1114,70 @@ function updateWeather(dt, camX, camY) {
 /* =========================================================================
    PARTICLES
    ========================================================================= */
-var PARTS = [], PIDX = 0;
+/* One InstancedMesh for every spark in the game: 260 particles cost a single
+   draw call instead of 260, and the scene graph never grows. */
+var PARTS = [], PIDX = 0, PMESH = null, PCOUNT = 260;
+var _pm = new THREE.Matrix4(), _pq = new THREE.Quaternion(),
+    _pv = new THREE.Vector3(), _ps = new THREE.Vector3(), _pc = new THREE.Color(),
+    _pz = new THREE.Vector3(0, 0, 1);
+
 function initParticles() {
-  for (var i = 0; i < 220; i++) {
-    var m = new THREE.Mesh(BOX, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true }));
-    m.visible = false; scene.add(m);
-    PARTS.push({ m: m, life: 0, max: 1, vx: 0, vy: 0, g: -22, size: 0.15 });
+  var mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 1, fog: false });
+  PMESH = new THREE.InstancedMesh(BOX, mat, PCOUNT);
+  PMESH.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  PMESH.frustumCulled = false;
+  if (PMESH.setColorAt) PMESH.setColorAt(0, _pc.setHex(0xffffff));
+  scene.add(PMESH);
+  for (var i = 0; i < PCOUNT; i++) {
+    PARTS.push({ x: 0, y: 0, z: 0, life: 0, max: 1, vx: 0, vy: 0, g: -22, size: 0.15, rot: 0 });
+    _pm.makeScale(0, 0, 0);
+    PMESH.setMatrixAt(i, _pm);
   }
 }
+
 function spawnParticles(x, y, z, color, count, speed, life, size, grav) {
   for (var i = 0; i < count; i++) {
-    var p = PARTS[PIDX]; PIDX = (PIDX + 1) % PARTS.length;
+    var p = PARTS[PIDX];
     var a = rnd(0, Math.PI * 2), s = rnd(speed * 0.3, speed);
     p.vx = Math.cos(a) * s; p.vy = Math.sin(a) * s + speed * 0.35;
     p.life = p.max = life * rnd(0.7, 1.2);
     p.g = grav === undefined ? -22 : grav;
     p.size = size || 0.16;
-    p.m.material.color.setHex(color);
-    p.m.material.opacity = 1;
-    p.m.position.set(x, y, z || 0.5);
-    p.m.scale.set(p.size, p.size, p.size);
-    p.m.visible = true;
+    p.x = x; p.y = y; p.z = z === undefined ? 0.5 : z;
+    p.rot = rnd(0, 6.28);
+    if (PMESH.setColorAt) PMESH.setColorAt(PIDX, _pc.setHex(color));
+    PIDX = (PIDX + 1) % PCOUNT;
   }
+  if (PMESH.instanceColor) PMESH.instanceColor.needsUpdate = true;
 }
+
 function updateParticles(dt) {
-  for (var i = 0; i < PARTS.length; i++) {
+  var dirty = false;
+  for (var i = 0; i < PCOUNT; i++) {
     var p = PARTS[i];
     if (p.life <= 0) continue;
     p.life -= dt;
-    if (p.life <= 0) { p.m.visible = false; continue; }
+    dirty = true;
+    if (p.life <= 0) { _pm.makeScale(0, 0, 0); PMESH.setMatrixAt(i, _pm); continue; }
     p.vy += p.g * dt;
-    p.m.position.x += p.vx * dt;
-    p.m.position.y += p.vy * dt;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.rot += dt * 6;
     var k = p.life / p.max;
-    p.m.material.opacity = k;
-    p.m.scale.setScalar(p.size * (0.35 + k * 0.65));
-    p.m.rotation.z += dt * 6;
+    var sc = p.size * (0.35 + k * 0.65) * (0.4 + k * 0.6);
+    _pv.set(p.x, p.y, p.z);
+    _pq.setFromAxisAngle(_pz, p.rot);
+    _ps.set(sc, sc, sc);
+    _pm.compose(_pv, _pq, _ps);
+    PMESH.setMatrixAt(i, _pm);
   }
+  if (dirty) PMESH.instanceMatrix.needsUpdate = true;
 }
 
 /* =========================================================================
    WORLD UPDATE (parallax, flames, torch lights)
    ========================================================================= */
-var wt = 0;
+var wt = 0, near = [], lightTick = 0;
 function updateWorld(dt, camX, camY) {
   wt += dt;
   updateWeather(dt, camX, camY);
@@ -927,23 +1207,36 @@ function updateWorld(dt, camX, camY) {
       if (s.position.x < -25) s.position.x = 92;
     }
   }
-  // flame flicker
+  // chandeliers and banners breathing in the draught (on-screen only)
+  for (var sw = 0; sw < swayers.length; sw++) {
+    var sy = swayers[sw];
+    if (Math.abs(sy.g.position.x - camX) > HALF_W + 4) continue;
+    sy.g.rotation.z = Math.sin(wt * sy.sp + sy.ph) * sy.amp;
+  }
+
+  // flame flicker — only for the ones actually on screen
+  var flameRange = HALF_W + 5;
   for (var f = 0; f < flames.length; f++) {
     var fl = flames[f];
-    if (!fl.fl || (fl.alive === false)) continue;
+    if (!fl.fl || fl.alive === false) continue;
+    if (Math.abs(fl.x - camX) > flameRange) { continue; }
     var k = 1 + Math.sin(wt * 11 + fl.ph) * 0.13 + Math.sin(wt * 27 + fl.ph * 2) * 0.07;
-    var base = fl.g && fl.g.children.length > 2 ? 1.7 : 1.15;
+    var base = fl.base || 1.15;
     fl.fl.scale.set(base * k, base * k * 1.15, 1);
     fl.fl.material.opacity = 0.8 + Math.sin(wt * 19 + fl.ph) * 0.15;
     if (fl.core) fl.core.scale.setScalar(0.7 * (2 - k));
   }
-  // assign the 5 dynamic torch lights to the nearest torches
-  var near = [];
-  for (var t = 0; t < torches.length; t++) {
-    var d = Math.abs(torches[t].x - camX);
-    if (d < HALF_W + 4) near.push({ d: d, t: torches[t] });
+  // assign the dynamic torch lights to the nearest torches (re-picked occasionally)
+  lightTick--;
+  if (lightTick <= 0) {
+    lightTick = 8;
+    near.length = 0;
+    for (var t = 0; t < torches.length; t++) {
+      var d = Math.abs(torches[t].x - camX);
+      if (d < HALF_W + 4) near.push({ d: d, t: torches[t] });
+    }
+    near.sort(function (a, b) { return a.d - b.d; });
   }
-  near.sort(function (a, b) { return a.d - b.d; });
   for (var L = 0; L < decoLights.length; L++) {
     if (L < near.length) {
       var tt = near[L].t;
