@@ -9,6 +9,7 @@ var movers = [], rings = [], rain = null, dust = null, lightning = 0, lightningC
 var ambLight = null, moonLight = null;
 var bolt = null, BOLT_SEGS = 26, shootingStar = null, starT = 5, starLife = 0;
 var swayers = [], breakWalls = [], rubble = null;
+var gears = [], pendulums = [], clockHands = [];
 var HALF_W = 10;
 
 /* ------------------------- procedural textures ------------------------- */
@@ -475,9 +476,15 @@ function addMovingPlat(left, bottom, w, h, ax, ay, sp, ph) {
 }
 function updateMovers(dt) {
   for (var i = 0; i < movers.length; i++) {
-    var mv = movers[i], p = mv.p;
-    var nx = mv.x0 + Math.sin(wt * mv.sp + mv.ph) * mv.ax;
-    var ny = mv.y0 + Math.sin(wt * mv.sp * 0.85 + mv.ph + 1.1) * mv.ay;
+    var mv = movers[i], p = mv.p, nx, ny;
+    if (mv.orbit) {
+      var a = wt * mv.sp + mv.ph;
+      nx = mv.cx + Math.cos(a) * mv.r;
+      ny = mv.cy + Math.sin(a) * mv.r;
+    } else {
+      nx = mv.x0 + Math.sin(wt * mv.sp + mv.ph) * mv.ax;
+      ny = mv.y0 + Math.sin(wt * mv.sp * 0.85 + mv.ph + 1.1) * mv.ay;
+    }
     var dx = nx - p.x, dy = ny - p.y;
     p.x = nx; p.y = ny;
     p.mesh.position.x = nx; p.mesh.position.y = ny;
@@ -485,6 +492,127 @@ function updateMovers(dt) {
     if (mv.chain) { mv.chain.position.x = nx; mv.chain.position.y = ny + 13.2; }
     if (P && P.ride === p && !P.dead) { P.x += dx; P.y += dy; }
   }
+}
+
+/* platforms bolted to a gear, orbiting its hub */
+function addOrbitPlat(cx, cy, r, sp, ph, w) {
+  var p = addPlat(cx + r - w / 2, cy, w, 0.5, { oneway: true, mat: MAT.wood, depth: 2, dynamic: true });
+  movers.push({ p: p, orbit: true, cx: cx, cy: cy + 0.25, r: r, sp: sp, ph: ph });
+  return p;
+}
+
+/* the clockwork itself: a toothed wheel that turns */
+function gear(x, y, r, teeth, sp, z, mat) {
+  var g = new THREE.Group();
+  var body = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.5, Math.max(10, teeth)), mat || MAT.iron);
+  body.rotation.x = Math.PI / 2;
+  g.add(body);
+  var hub = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.22, r * 0.22, 0.62, 10), MAT.gold);
+  hub.rotation.x = Math.PI / 2;
+  g.add(hub);
+  for (var i = 0; i < teeth; i++) {
+    var a = (i / teeth) * Math.PI * 2;
+    var t = box(r * 0.3, r * 0.3, 0.5, mat || MAT.iron, Math.cos(a) * r, Math.sin(a) * r, 0);
+    t.rotation.z = a;
+    g.add(t);
+  }
+  for (var k = 0; k < 4; k++) {                       // spokes
+    var sp2 = box(r * 1.5, r * 0.18, 0.56, mat || MAT.iron, 0, 0, 0);
+    sp2.rotation.z = (k / 4) * Math.PI;
+    g.add(sp2);
+  }
+  g.position.set(x, y, z === undefined ? -5 : z);
+  scene.add(g);
+  gears.push({ g: g, sp: sp });
+  return g;
+}
+
+/* a long pendulum ticking away behind the platforms */
+function pendulum(x, y, len, sp, ph) {
+  var g = new THREE.Group();
+  g.add(box(0.16, len, 0.16, MAT.iron, 0, -len / 2, 0));
+  var bob = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.85, 0.35, 16), MAT.gold);
+  bob.rotation.x = Math.PI / 2;
+  bob.position.y = -len;
+  g.add(bob);
+  g.position.set(x, y, -4.5);
+  scene.add(g);
+  pendulums.push({ g: g, sp: sp, ph: ph || 0 });
+  return g;
+}
+
+/* the great clock face high on the tower wall */
+function clockFace(x, y, r) {
+  var tex = cvs(256, 256, function (c, w, h) {
+    c.fillStyle = '#1a1712'; c.beginPath(); c.arc(w / 2, h / 2, w / 2 - 4, 0, 6.283); c.fill();
+    c.strokeStyle = '#c8a24a'; c.lineWidth = 7;
+    c.beginPath(); c.arc(w / 2, h / 2, w / 2 - 8, 0, 6.283); c.stroke();
+    c.strokeStyle = '#e8dcc0';
+    for (var i = 0; i < 12; i++) {
+      var a = (i / 12) * 6.283, r0 = w / 2 - 20, r1 = w / 2 - (i % 3 === 0 ? 44 : 32);
+      c.lineWidth = i % 3 === 0 ? 8 : 4;
+      c.beginPath();
+      c.moveTo(w / 2 + Math.cos(a) * r0, h / 2 + Math.sin(a) * r0);
+      c.lineTo(w / 2 + Math.cos(a) * r1, h / 2 + Math.sin(a) * r1);
+      c.stroke();
+    }
+  });
+  var face = new THREE.Mesh(new THREE.CircleGeometry(r, 36),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, fog: false }));
+  face.position.set(x, y, -8.2);
+  scene.add(face);
+  var hourH = box(0.28, r * 0.55, 0.2, MAT.gold, 0, r * 0.27, 0);
+  var minH = box(0.2, r * 0.85, 0.2, MAT.gold, 0, r * 0.42, 0);
+  var pivot1 = new THREE.Group(), pivot2 = new THREE.Group();
+  pivot1.add(hourH); pivot2.add(minH);
+  pivot1.position.set(x, y, -8.0); pivot2.position.set(x, y, -7.9);
+  scene.add(pivot1); scene.add(pivot2);
+  var gl = sprite(TEX.glow, r * 2.4, 0xffd070, 0.2);
+  gl.position.set(x, y, -7.6); scene.add(gl);
+  clockHands.push({ h: pivot1, m: pivot2 });
+}
+
+/* ------------------------- contact shadows ------------------------- */
+var SHADOWS = null, SHADOW_N = 18, _sm = new THREE.Matrix4(),
+    _sv = new THREE.Vector3(), _sq = new THREE.Quaternion(), _ss = new THREE.Vector3();
+function initShadows() {
+  var geo = new THREE.CircleGeometry(0.5, 14);
+  geo.rotateX(-Math.PI / 2);
+  SHADOWS = new THREE.InstancedMesh(geo, new THREE.MeshBasicMaterial({
+    color: 0x000000, transparent: true, opacity: 0.34, depthWrite: false, fog: false
+  }), SHADOW_N);
+  SHADOWS.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  SHADOWS.frustumCulled = false;
+  SHADOWS.matrixAutoUpdate = false;
+  scene.add(SHADOWS);
+  for (var i = 0; i < SHADOW_N; i++) { _sm.makeScale(0, 0, 0); SHADOWS.setMatrixAt(i, _sm); }
+}
+/* highest solid surface under a point, or null if there is nothing to stand on */
+function groundY(x, y) {
+  var best = null;
+  for (var i = 0; i < platforms.length; i++) {
+    var p = platforms[i];
+    if (Math.abs(x - p.x) * 2 > p.w) continue;
+    var top = p.y + p.h / 2;
+    if (top <= y + 0.1 && (best === null || top > best)) best = top;
+  }
+  return best;
+}
+var _shadowIdx = 0;
+function beginShadows() { _shadowIdx = 0; }
+function castShadow(x, y, w) {
+  if (_shadowIdx >= SHADOW_N) return;
+  var g = groundY(x, y);
+  if (g === null || y - g > 7) return;
+  var k = clamp(1 - (y - g) / 7, 0.18, 1);      // fades and shrinks with height
+  _sv.set(x, g + 0.06, -0.6);
+  _ss.set(w * (0.6 + k * 0.7), 1, w * 0.45 * (0.6 + k * 0.7));
+  _sm.compose(_sv, _sq, _ss);
+  SHADOWS.setMatrixAt(_shadowIdx++, _sm);
+}
+function endShadows() {
+  for (var i = _shadowIdx; i < SHADOW_N; i++) { _sm.makeScale(0, 0, 0); SHADOWS.setMatrixAt(i, _sm); }
+  SHADOWS.instanceMatrix.needsUpdate = true;
 }
 
 /* expanding shockwave ring, used for double jumps and kills */
@@ -811,21 +939,63 @@ function buildLevel() {
   [182, 188, 213, 221, 226].forEach(function (x) { candle(x, 2.6); });
   candle(197, 6.4); candle(206, 7.2);
 
-  /* ============ ZONE D — THRONE ROOM (228.2 .. 268) ============ */
-  backWall(228, 268, -6, 18, MAT.stoneDark);
-  addPlat(228.2, -5, 40, 5);                  // 228.2 .. 268.2
-  addPlat(266, 0, 3, 14);                     // far wall
-  pillar(236, 0, 11); pillar(258, 0, 11);
-  stainedGlass(247, 10.5, 3.6);
-  glossyFloor(228.2, 268, 0);
-  carpet(240, 268, 0);
-  candelabra(238.5, 0); candelabra(255.5, 0);
-  banner(232, 6); banner(262, 6);
-  addPlat(238, 3.6, 4.5, 0.45, { oneway: true, mat: MAT.wood, depth: 2 });
-  addPlat(253, 3.6, 4.5, 0.45, { oneway: true, mat: MAT.wood, depth: 2 });
-  torch(233, 4.4); torch(243, 4.4); torch(251, 4.4); torch(262, 4.4);
-  candle(231, 2.6); candle(263, 2.6);
-  cobweb(229.4, 10.4, false); cobweb(265.2, 10.4, true);
+  /* ============ ZONE D — THE CLOCK TOWER (228.2 .. 300) ============ */
+  backWall(228, 300, -6, 20, MAT.stoneWarm);
+  clockFace(252, 13, 5.2);
+
+  addPlat(228.2, -5, 16, 5);                  // 228.2 .. 244.2
+  voidPlane(244.2, 252.4, 0);
+  addOrbitPlat(248.3, 2.6, 2.5, 0.85, 0, 3.2);
+  addOrbitPlat(248.3, 2.6, 2.5, 0.85, Math.PI, 3.2);
+
+  addPlat(252.4, -5, 10, 5);                  // 252.4 .. 262.4
+  voidPlane(262.4, 272.6, 0);
+  addOrbitPlat(265.6, 3.2, 2.3, -0.95, 1.2, 3.0);
+  addOrbitPlat(270.4, 4.4, 2.1, 0.9, 2.6, 3.0);
+
+  addPlat(272.6, -5, 11, 5);                  // 272.6 .. 283.6
+  voidPlane(283.6, 293.8, 0);
+  addOrbitPlat(288.7, 3.0, 2.6, -0.8, 0.6, 3.4);
+  addOrbitPlat(288.7, 3.0, 2.6, -0.8, 0.6 + Math.PI, 3.4);
+
+  addPlat(293.8, -5, 6.6, 5);                 // 293.8 .. 300.4 (joins the throne room)
+
+  // the machinery
+  gear(240, 9, 3.4, 12, 0.35, -6);
+  gear(247.5, 12.5, 2.2, 10, -0.55, -6);
+  gear(258, 8, 4.2, 14, -0.28, -6.5);
+  gear(268, 13, 2.8, 11, 0.45, -6);
+  gear(279, 9.5, 3.6, 12, -0.33, -6.5);
+  gear(291, 12, 2.4, 10, 0.6, -6);
+  // hubs the lug platforms ride on — kept small and dark so they read as
+  // machinery behind the action rather than a wall of gold
+  gear(248.3, 2.85, 0.75, 8, 0.85, -2.6);
+  gear(265.6, 3.45, 0.7, 8, -0.95, -2.6);
+  gear(270.4, 4.65, 0.65, 8, 0.9, -2.6);
+  gear(288.7, 3.25, 0.8, 8, -0.8, -2.6);
+  pendulum(256, 16, 7.5, 1.1, 0);
+  pendulum(285, 16, 6.5, 1.3, 1.5);
+
+  for (var tw = 231; tw < 300; tw += 9) torch(tw, 4.6);
+  [233, 241, 256, 260, 275, 281, 296].forEach(function (x) { candle(x, 2.6); });
+  cobweb(229.6, 11.5, false); cobweb(298.6, 11.5, true);
+  addBreakWall(258.5, 0, 1.6, 2.2, 'crystal');
+
+  /* ============ ZONE E — THRONE ROOM (300.4 .. 340) ============ */
+  backWall(300, 340, -6, 18, MAT.stoneDark);
+  addPlat(300.4, -5, 40, 5);                  // 300.4 .. 340.4
+  addPlat(338, 0, 3, 14);                     // far wall
+  pillar(308, 0, 11); pillar(330, 0, 11);
+  stainedGlass(319, 10.5, 3.6);
+  glossyFloor(300.4, 340, 0);
+  carpet(312, 340, 0);
+  candelabra(310.5, 0); candelabra(327.5, 0);
+  banner(304, 6); banner(334, 6);
+  addPlat(310, 3.6, 4.5, 0.45, { oneway: true, mat: MAT.wood, depth: 2 });
+  addPlat(325, 3.6, 4.5, 0.45, { oneway: true, mat: MAT.wood, depth: 2 });
+  torch(305, 4.4); torch(315, 4.4); torch(323, 4.4); torch(334, 4.4);
+  candle(303, 2.6); candle(335, 2.6);
+  cobweb(301.4, 10.4, false); cobweb(337.2, 10.4, true);
 
   // throne
   var th = new THREE.Group();
@@ -834,7 +1004,7 @@ function buildLevel() {
   th.add(box(0.4, 1.6, 1.8, MAT.stoneWarm, -1.2, 1.1, 0.2));
   th.add(box(0.4, 1.6, 1.8, MAT.stoneWarm, 1.2, 1.1, 0.2));
   th.add(box(1.4, 0.4, 0.6, MAT.gold, 0, 3.9, -0.7));
-  th.position.set(247, 0, -3.5);
+  th.position.set(319, 0, -3.5);
   scene.add(th);
 }
 
@@ -860,7 +1030,7 @@ function killGate(g) {
 }
 
 var gateThrone = null, gateMidA = null, gateMidB = null;
-function sealArena() { if (!gateThrone) { gateThrone = makeGate(226.5, 0, 1.6, 14); A.boom(); } }
+function sealArena() { if (!gateThrone) { gateThrone = makeGate(298.6, 0, 1.6, 14); A.boom(); } }
 function openArena() { gateThrone = killGate(gateThrone); }
 function sealMidArena() {
   if (gateMidA) return;
@@ -936,7 +1106,8 @@ function buildRubble() {
   var m = new THREE.Matrix4(), q = new THREE.Quaternion(),
       v = new THREE.Vector3(), sc = new THREE.Vector3(), z = new THREE.Vector3(0, 0, 1);
   var spots = [[-4, 40, 0], [47, 71, 0], [72, 96, 4.1], [111, 142, 0],
-               [148, 179, 0], [180, 192, 0], [211, 228, 0], [229, 266, 0]];
+               [148, 179, 0], [180, 192, 0], [211, 228, 0], [229, 244, 0],
+               [253, 262, 0], [273, 283, 0], [294, 300, 0], [301, 338, 0]];
   for (var i = 0; i < n; i++) {
     var sp = spots[i % spots.length];
     var s = rnd(0.1, 0.3);
@@ -1220,6 +1391,22 @@ function updateWorld(dt, camX, camY) {
       if (s.position.x < -25) s.position.x = 92;
     }
   }
+  // clockwork keeps turning wherever the camera is looking
+  for (var gi = 0; gi < gears.length; gi++) {
+    var ge = gears[gi];
+    if (Math.abs(ge.g.position.x - camX) > HALF_W + 14) continue;
+    ge.g.rotation.z += ge.sp * dt;
+  }
+  for (var pi = 0; pi < pendulums.length; pi++) {
+    var pe = pendulums[pi];
+    if (Math.abs(pe.g.position.x - camX) > HALF_W + 12) continue;
+    pe.g.rotation.z = Math.sin(wt * pe.sp + pe.ph) * 0.5;
+  }
+  for (var ci = 0; ci < clockHands.length; ci++) {
+    clockHands[ci].m.rotation.z = -wt * 0.5;
+    clockHands[ci].h.rotation.z = -wt * 0.042;
+  }
+
   // chandeliers and banners breathing in the draught (on-screen only)
   for (var sw = 0; sw < swayers.length; sw++) {
     var sy = swayers[sw];

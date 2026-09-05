@@ -24,16 +24,23 @@ var SPAWNS = [
   S('medusa', 197, 5.5, -2.5), S('medusa', 203, 7, -2.3), S('medusa', 208, 4.5, -2.6),
   S('bat', 205, 9), S('skeleton', 213, 0), S('axearmor', 218, 0),
   S('fleaman', 222, 0), S('bonepillar', 225, 0),
-  /* --- Zone D: throne room approach --- */
-  S('bat', 231, 5), S('zombie', 234, 0)
+  /* --- Zone D: the clock tower --- */
+  S('raven', 234, 5.5), S('bonepillar', 238, 0), S('raven', 242, 6.5),
+  S('skeleton', 255, 0), S('medusa', 258, 5, -2.4), S('axearmor', 260, 0),
+  S('raven', 267, 7), S('bat', 271, 6), S('fleaman', 276, 0),
+  S('skeleton', 280, 0), S('bonepillar', 282, 0), S('raven', 290, 5.5),
+  S('medusa', 292, 6.5, -2.5), S('zombie', 296, 0),
+  /* --- Zone E: throne room approach --- */
+  S('bat', 303, 5), S('zombie', 306, 0)
 ];
 
-var CHECKPOINTS = [3, 112, 160, 181, 230];
+var CHECKPOINTS = [3, 112, 160, 181, 230, 275, 302];
 var ZONES = [
   { x: 97.6, key: 'courtyard', name: 'COURTYARD', num: 'I' },
   { x: 179.4, key: 'hall', name: 'GREAT HALL', num: 'II' },
   { x: 228.2, key: 'chasm', name: 'THE CHASM', num: 'III' },
-  { x: 9999, key: 'boss', name: 'THRONE ROOM', num: 'IV' }
+  { x: 300.4, key: 'tower', name: 'CLOCK TOWER', num: 'IV' },
+  { x: 9999, key: 'boss', name: 'THRONE ROOM', num: 'V' }
 ];
 
 /* ------------------------- game state ------------------------- */
@@ -303,7 +310,7 @@ function updateProgress(dt) {
   if (zi !== G.zone) {
     if (G.zone >= 0) { G.card(ZONES[zi].num, ZONES[zi].name); A.stageJingle(); }
     G.zone = zi;
-    if (!boss) A.setTheme(ZONES[zi].key === 'boss' ? 'chasm' : ZONES[zi].key);
+    if (!boss) A.setTheme(ZONES[zi].key === 'boss' ? 'tower' : ZONES[zi].key);
     A.setAmbience(zi === 0 ? 'wind' : 'hall');
   }
 
@@ -313,7 +320,7 @@ function updateProgress(dt) {
     spawnMidBoss();
     bossIntro();
   }
-  if (!G.bossStarted && P.x > 233) {
+  if (!G.bossStarted && P.x > BOSS_TRIGGER) {
     G.bossStarted = true;
     sealArena();
     spawnBoss();
@@ -336,7 +343,7 @@ function respawnArenaCandles(dt) {
   G.candleT -= dt;
   if (G.candleT > 0) return;
   G.candleT = 7;
-  var lo = boss.kind === 'bat' ? 166 : 228, hi = boss.kind === 'bat' ? 180 : 268;
+  var lo = boss.kind === 'bat' ? 166 : 300, hi = boss.kind === 'bat' ? 180 : 340;
   for (var i = 0; i < candles.length; i++) {
     var c = candles[i];
     if (!c.alive && c.x > lo && c.x < hi) {
@@ -428,6 +435,7 @@ function frame(now) {
       updateMovers(dt);
       updatePlayer(dt);
       updateEnemies(dt);
+      endShadows();
       updateProjectiles(dt);
       updateItems(dt);
       if (boss) updateBoss(dt);
@@ -473,6 +481,7 @@ function boot() {
   buildLevel();
   buildRubble();
   optimizeScene();
+  initShadows();
   createPlayer();
   buildBars();
   initRes();

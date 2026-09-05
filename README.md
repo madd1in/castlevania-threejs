@@ -39,19 +39,24 @@ Im Titelbildschirm mit `←` / `→` wählbar:
 
 ## Spielinhalt
 
-**4 Zonen, ein durchgehendes Level (~270 Einheiten):**
+**5 Zonen, ein durchgehendes Level (~340 Einheiten):**
 
 1. **Courtyard** — Burghof im Gewitter unter dem blutroten Mond: Regen mit Aufschlagspritzern,
    Blitze mit Donner, wirbelndes Laub, Kisten, Stachelgrube, Aufgang zur Wehrmauer
 2. **Great Hall** — Kirchenfenster mit einfallenden Mondstrahlen, Staubflocken, Kronleuchter,
    Banner, Spinnweben, Holzbalkone. Am Ende: **Zwischenboss**
 3. **The Chasm** — Abgrund über festen *und* beweglichen Hängeplattformen, Medusenköpfe im Anflug
-4. **Throne Room** — Rosenfenster aus Buntglas, roter Teppich, Kandelaber, polierter Boden.
+4. **Clock Tower** — das Uhrwerk des Schlosses: eine große Turmuhr mit laufenden Zeigern,
+   mahlende Zahnräder in mehreren Tiefen, schwingende Pendel. Über drei Abgründe geht es
+   nur über **Mitnehmer-Plattformen, die auf Zahnrädern im Kreis fahren** — jeweils zwei
+   pro Rad, gegenüberliegend, damit immer eine erreichbar ist
+5. **Throne Room** — Rosenfenster aus Buntglas, roter Teppich, Kandelaber, polierter Boden.
    Das Tor fällt hinter dir zu: Endkampf
 
 **Gegner:** Fledermaus (hängt schlafend, wacht auf), Zombie, Skelett (wirft Knochen),
 Medusenkopf (Sinuskurve), Axe Armor, Fleaman (springt), Geist (fliegt durch Wände)
-und **Bone Pillar** — ein festgewachsener Knochenturm, der Feuer in flachem Bogen spuckt.
+**Bone Pillar** (festgewachsener Knochenturm, spuckt Feuer in flachem Bogen) und
+**Rabe** — sitzt reglos, bis du in Reichweite bist, dann stürzt er im Sturzflug los.
 
 **Zwischenboss — Giant Bat:** kreist über der Halle, **glüht kurz auf, bevor er im Sturzflug
 herabstößt**, und beschwört dabei kleine Fledermäuse. Belohnung: Peitschen-Upgrade, Double Shot,
@@ -78,6 +83,10 @@ Alle **25 000 Punkte** gibt es ein Extraleben.
 
 **Peitschen-Stufen:** Leather → Chain → Morning Star (mehr Reichweite und Schaden).
 
+**Juice:** Die Peitsche zieht einen leuchtenden Bogen hinter der Spitze her, Simon
+staucht beim Aufkommen und streckt sich im Flug, getroffene Gegner blitzen weiß auf,
+und alles wirft einen weichen Kontaktschatten auf den Boden unter sich.
+
 **Sonstiges:** Gewitter mit gezeichneten, verästelten Blitzbögen und Sternschnuppen,
 schwingende Kronleuchter und Banner, Schutt und Geröll auf dem Boden,
 Boss-Intro mit Namenstafel und Musik-Sting, Combo-Multiplikator bis ×5,
@@ -89,8 +98,8 @@ verdichtet sich.
 
 ## Audio
 
-Alles per WebAudio synthetisiert — **acht eigene Chiptune-Themen** (Titel, Courtyard, Great Hall,
-Chasm, Zwischenboss, Dracula, Victory, Game Over) mit Bass, Sub-Bass, Arpeggio, Lead mit
+Alles per WebAudio synthetisiert — **neun eigene Chiptune-Themen** (Titel, Courtyard, Great Hall,
+Chasm, Clock Tower, Zwischenboss, Dracula, Victory, Game Over) mit Bass, Sub-Bass, Arpeggio, Lead mit
 Detune-Layer und tempo-synchronem Feedback-Delay, Kirchenorgel-Pads in den Boss-Themen,
 Kick, Snare, Hi-Hat und Tom-Fills am Phrasenende. Bei niedriger Gesundheit schaltet die Engine
 in einen „Danger"-Modus: tiefe Drone, doppelte Hi-Hat-Dichte, durchgehende Fills.

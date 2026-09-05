@@ -89,6 +89,51 @@ function buildWhip() {
   return g;
 }
 
+/* a fading arc that follows the whip tip through its swing */
+var TRAIL_N = 10, trailMesh = null, trailPts = [];
+function buildTrail() {
+  var geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TRAIL_N * 18), 3));
+  trailMesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+    color: 0xffe8b0, transparent: true, opacity: 0, fog: false,
+    blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
+  }));
+  trailMesh.frustumCulled = false;
+  trailMesh.visible = false;
+  scene.add(trailMesh);
+}
+function pushTrail(x, y) {
+  trailPts.push(x, y);
+  while (trailPts.length > (TRAIL_N + 1) * 2) trailPts.shift(), trailPts.shift();
+}
+function updateTrail() {
+  var n = trailPts.length / 2 - 1;
+  if (n < 2) { trailMesh.visible = false; return; }
+  var arr = trailMesh.geometry.attributes.position.array, seg = 0;
+  for (var i = 0; i < n && seg < TRAIL_N; i++) {
+    var x0 = trailPts[i * 2], y0 = trailPts[i * 2 + 1];
+    var x1 = trailPts[i * 2 + 2], y1 = trailPts[i * 2 + 3];
+    var dx = x1 - x0, dy = y1 - y0, len = Math.max(0.001, Math.hypot(dx, dy));
+    var w0 = 0.03 + (i / n) * 0.22, w1 = 0.03 + ((i + 1) / n) * 0.22;
+    var nx0 = (dy / len) * w0, ny0 = (-dx / len) * w0;
+    var nx1 = (dy / len) * w1, ny1 = (-dx / len) * w1;
+    var o = seg * 18, z = 0.3;
+    arr[o] = x0 - nx0; arr[o + 1] = y0 - ny0; arr[o + 2] = z;
+    arr[o + 3] = x0 + nx0; arr[o + 4] = y0 + ny0; arr[o + 5] = z;
+    arr[o + 6] = x1 + nx1; arr[o + 7] = y1 + ny1; arr[o + 8] = z;
+    arr[o + 9] = x0 - nx0; arr[o + 10] = y0 - ny0; arr[o + 11] = z;
+    arr[o + 12] = x1 + nx1; arr[o + 13] = y1 + ny1; arr[o + 14] = z;
+    arr[o + 15] = x1 - nx1; arr[o + 16] = y1 - ny1; arr[o + 17] = z;
+    seg++;
+  }
+  for (; seg < TRAIL_N; seg++) {
+    var o2 = seg * 18;
+    for (var k = 0; k < 18; k++) arr[o2 + k] = 0;
+  }
+  trailMesh.geometry.attributes.position.needsUpdate = true;
+  trailMesh.visible = true;
+}
+
 var WHIPS = [
   { name: 'LEATHER', len: 2.3, dmg: 1, col: 0x5a3418 },
   { name: 'CHAIN', len: 3.0, dmg: 2, col: 0x9098a6 },
@@ -100,13 +145,14 @@ function createPlayer() {
   var g = buildSimon();
   var whip = buildWhip();
   scene.add(g); scene.add(whip);
+  buildTrail();
   var torch = new THREE.PointLight(0xffb060, 0.9, 9, 2);
   scene.add(torch);
   P = {
     x: 3, y: 2, vx: 0, vy: 0, w: 0.62, h: STAND_H,
     face: 1, onGround: false, onOneway: false, dropping: 0, ride: null,
     hp: 20, maxHp: 20, hearts: 8, lives: 4,
-    jumps: 0, maxJumps: 2, coyote: 0, buffer: 0, spin: 0, crouch: false,
+    jumps: 0, maxJumps: 2, coyote: 0, buffer: 0, spin: 0, crouch: false, landSquash: 0,
     whipLvl: 0, sub: null, subMul: 1,
     atk: 0, atkCool: 0, inv: 0, dead: false, deadT: 0,
     walkT: 0, g: g, whip: whip, torch: torch, checkpoint: { x: 3, y: 2 }
@@ -205,7 +251,8 @@ function updatePlayer(dt) {
   var wasAir = !P.onGround;
   collide(P, dt);
   if (P.onGround && wasAir && P.vy === 0) {
-    A.land(); spawnParticles(P.x, P.y - P.h / 2, 0.6, 0x6a6250, 4, 2, 0.3, 0.1);
+    A.land(); P.landSquash = 0.16;
+    spawnParticles(P.x, P.y - P.h / 2, 0.6, 0x6a6250, 4, 2, 0.3, 0.1);
   }
 
   P.x = clamp(P.x, LEVEL_MIN + 1, LEVEL_MAX);
@@ -228,9 +275,18 @@ function updatePlayer(dt) {
     else if (t < 0.62) ext = (t - 0.3) / 0.32;
     else ext = Math.max(0, 1 - (t - 0.62) / 0.38);
     drawWhip(ext, W);
+    if (ext > 0.15) {
+      var tipSeg = P.whip.userData.segs[P.whip.userData.segs.length - 1];
+      pushTrail(P.x + tipSeg.position.x, P.y + tipSeg.position.y);
+      trailMesh.material.opacity = 0.55;
+      updateTrail();
+    }
     if (t >= 0.32 && t <= 0.7) whipHitTest(W);
   } else {
     P.whip.visible = false;
+    if (trailPts.length) { trailPts.shift(); trailPts.shift(); updateTrail(); }
+    trailMesh.material.opacity = Math.max(0, trailMesh.material.opacity - dt * 4);
+    if (trailMesh.material.opacity <= 0.01) trailMesh.visible = false;
   }
 
   /* ---- animation ---- */
@@ -272,6 +328,20 @@ function updatePlayer(dt) {
   m.torso.rotation.z = P.atk > 0 ? -0.12 : 0;
   m.cape.rotation.z = -P.vx * 0.045;
   m.cape.position.y = 0.06 - crouchY * 0.5;
+
+  // squash on impact, stretch through the air
+  var vs = clamp(P.vy / 16, -0.85, 0.85);
+  var stretch = P.onGround ? 1 : 1 + Math.abs(vs) * 0.13;
+  var squash = P.onGround ? 1 : 1 - Math.abs(vs) * 0.09;
+  if (P.landSquash > 0) {
+    P.landSquash -= dt;
+    var ls = P.landSquash / 0.16;
+    stretch = 1 - ls * 0.22; squash = 1 + ls * 0.18;
+  }
+  P.g.scale.set(squash, stretch, squash);
+
+  beginShadows();
+  castShadow(P.x, P.y - P.h / 2, P.w * 1.4);
 
   P.g.position.set(P.x, P.y + (P.crouch ? 0.32 : 0), 0);
   P.g.rotation.y = P.face > 0 ? 0 : Math.PI;
@@ -707,6 +777,16 @@ function buildEnemyMesh(type) {
     g.add(jaw);
     g.userData.jaw = jaw;
     g.userData.skull = sk;
+  } else if (type === 'raven') {
+    g.add(colorBox(0.5, 0.28, 0.3, 0x1c1a24, 0, 0, 0));
+    g.add(colorBox(0.26, 0.24, 0.24, 0x24202e, 0.26, 0.1, 0));
+    g.add(colorBox(0.22, 0.08, 0.08, 0xc8a24a, 0.44, 0.08, 0));
+    g.add(colorBox(0.06, 0.06, 0.04, 0xff5030, 0.3, 0.14, 0.12));
+    g.add(colorBox(0.36, 0.1, 0.24, 0x141220, -0.3, -0.02, 0));
+    var rwl = colorBox(0.42, 0.14, 0.1, 0x141220, -0.08, 0.12, -0.16);
+    var rwr = colorBox(0.42, 0.14, 0.1, 0x141220, -0.08, 0.12, 0.16);
+    g.add(rwl); g.add(rwr);
+    g.userData.wl = rwl; g.userData.wr = rwr;
   } else if (type === 'ghost') {
     var bd = colorBox(0.6, 0.9, 0.5, 0xc8d4e8, 0, 0, 0);
     bd.material.transparent = true; bd.material.opacity = 0.55;
@@ -729,7 +809,8 @@ var ESTATS = {
   axearmor: { w: 0.95, h: 1.9, hp: 6, score: 900, dmg: 2, fly: 0 },
   fleaman:  { w: 0.55, h: 0.7, hp: 2, score: 400, dmg: 1, fly: 0 },
   ghost:    { w: 0.7, h: 1.3, hp: 2, score: 350, dmg: 1, fly: 1 },
-  bonepillar: { w: 0.8, h: 2.6, hp: 4, score: 600, dmg: 2, fly: 0 }
+  bonepillar: { w: 0.8, h: 2.6, hp: 4, score: 600, dmg: 2, fly: 0 },
+  raven:    { w: 0.7, h: 0.5, hp: 1, score: 350, dmg: 1, fly: 1 }
 };
 
 function spawnEnemy(type, x, y, def) {
@@ -749,10 +830,27 @@ function spawnEnemy(type, x, y, def) {
 
 function damageEnemy(e, dmg) {
   e.hp -= dmg; e.hitCd = 0.12;
+  flashEnemy(e);
   A.hit();
   G.hitstop(0.035);
   spawnParticles(e.x, e.y, 0.7, 0xffffff, 6, 3.5, 0.3, 0.11);
   if (e.hp <= 0) killEnemy(e);
+}
+
+/* punch up the impact: tint every part of the model white for a moment */
+function flashEnemy(e) {
+  if (!e.mats) {
+    e.mats = [];
+    e.g.traverse(function (o) {
+      if (o.material && o.material.emissive) e.mats.push(o.material);
+    });
+    e.baseEmissive = e.mats.map(function (m) { return m.emissive.getHex(); });
+  }
+  for (var i = 0; i < e.mats.length; i++) e.mats[i].emissive.setHex(0xaaaaaa);
+}
+function unflashEnemy(e) {
+  if (!e.mats) return;
+  for (var i = 0; i < e.mats.length; i++) e.mats[i].emissive.setHex(e.baseEmissive[i]);
 }
 
 function killEnemy(e) {
@@ -792,6 +890,21 @@ function updateEnemies(dt) {
           if (e.g.userData.wl) {
             var f = Math.sin(e.t * 22) * 0.9;
             e.g.userData.wl.rotation.z = -f; e.g.userData.wr.rotation.z = f;
+          }
+          break;
+        case 'raven':                             // perches, then dives hard
+          if (!e.diving) {
+            e.y = e.y0 + Math.sin(e.t * 2) * 0.12;
+            if (adx < 9.5) { e.diving = true; e.dvx = (dx > 0 ? 1 : -1) * 9.5; e.dvy = clamp(dy, -6, 2); }
+          } else {
+            e.x += e.dvx * dt;
+            e.y += e.dvy * dt;
+            e.dvy += 3.2 * dt;                     // levels out after the dive
+          }
+          e.face = (e.diving ? e.dvx : -1) > 0 ? 1 : -1;
+          if (e.g.userData.wl) {
+            var rf = Math.sin(e.t * (e.diving ? 26 : 8)) * 0.8;
+            e.g.userData.wl.rotation.x = -rf; e.g.userData.wr.rotation.x = rf;
           }
           break;
         case 'medusa':
@@ -882,7 +995,9 @@ function updateEnemies(dt) {
 
     if (e.type !== 'bat' || e.awake) e.g.position.set(e.x, e.y, 0);
     e.g.rotation.y = e.face > 0 ? 0 : Math.PI;
-    e.g.visible = e.hitCd > 0 ? (Math.floor(e.hitCd * 40) % 2 === 0) : true;
+    if (e.hitCd <= 0 && e.mats) unflashEnemy(e);
+    e.g.visible = true;
+    castShadow(e.x, e.y - e.h / 2, e.w * 1.15);
 
     if (!P.dead && P.inv <= 0 && hits(e, P)) playerHurt(e.dmg, e.x);
 
@@ -896,7 +1011,7 @@ function updateEnemies(dt) {
 /* =========================================================================
    BOSSES
    ========================================================================= */
-var BOSS_SPOTS = [[234, 1.2], [241, 1.2], [252, 1.2], [259, 1.2], [240, 5.2], [254, 5.2]];
+var BOSS_SPOTS = [[306, 1.2], [313, 1.2], [324, 1.2], [331, 1.2], [312, 5.2], [326, 5.2]];
 
 function buildDracula() {
   var g = new THREE.Group();
