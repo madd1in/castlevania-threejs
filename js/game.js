@@ -92,6 +92,13 @@ var G = {
 
 function saveBest(v) { try { localStorage.setItem('cv_best', '' + v); } catch (e) { } }
 function loadBest() { try { return parseInt(localStorage.getItem('cv_best') || '0', 10) || 0; } catch (e) { return 0; } }
+function saveDiff() { try { localStorage.setItem('cv_diff', '' + diffIdx); } catch (e) { } }
+function loadDiff() {
+  try {
+    var v = parseInt(localStorage.getItem('cv_diff'), 10);
+    return (v >= 0 && v < DIFFS.length) ? v : 0;
+  } catch (e) { return 0; }
+}
 
 function clearActors() {
   var i;
@@ -354,6 +361,7 @@ function frame(now) {
 
   if (G.state === 'title' && (tap('left') || tap('right'))) {
     diffIdx = (diffIdx + (input.left ? DIFFS.length - 1 : 1)) % DIFFS.length;
+    saveDiff();
     $('frame').innerHTML = FRAMES.title();
     A.item();
   }
@@ -422,6 +430,7 @@ function boot() {
   createPlayer();
   buildBars();
   G.best = loadBest();
+  diffIdx = loadDiff();
   setState('title');
   G.camX = 20; G.camY = 5;
   updateCamera(0.016);
