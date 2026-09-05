@@ -895,7 +895,7 @@ function strikeBolt() {
   }
 
   // main channel walks down through the part of the sky the camera can see
-  var x = rnd(-18, 18), y = 30;
+  var x = rnd(-11, 11), y = 21;      // stay near the visible slice of sky
   while (seg < BOLT_SEGS && y > 4) {
     var nx2 = x + rnd(-1.9, 1.9), ny2 = y - rnd(1.4, 2.8);
     quad(x, y, nx2, ny2, hw);
